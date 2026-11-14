@@ -1,29 +1,53 @@
-import { createSlice } from '@reduxjs/toolkit';
+import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import { initialState } from './stationsState';
-import { fetchStations } from './stationsThunks';
+import { fetchStations, recommendStations } from './stationsThunks';
 
 const stationsSlice = createSlice({
   name: 'stations',
   initialState,
-  reducers: {},
+  reducers: {
+    clearSearch: (state) => {
+      state.hasSearched = false;
+      state.recommendations = [];
+    },
+    setSearchBattery: (
+      state,
+      action: PayloadAction<{ currentBatteryPercent: number; targetBatteryPercent: number }>
+    ) => {
+      state.currentBatteryPercent = action.payload.currentBatteryPercent;
+      state.targetBatteryPercent = action.payload.targetBatteryPercent;
+    },
+  },
   extraReducers: (builder) => {
     builder
-      // בזמן שליחת הבקשה
       .addCase(fetchStations.pending, (state) => {
         state.loading = true;
         state.error = null;
       })
-      // כשהנתונים הגיעו בהצלחה
       .addCase(fetchStations.fulfilled, (state, action) => {
         state.loading = false;
         state.items = action.payload;
+        state.hasSearched = false;
       })
-      // כשיש שגיאה
       .addCase(fetchStations.rejected, (state, action) => {
         state.loading = false;
-        state.error = action.error.message ?? 'Error loading stations';
+        state.error = action.error.message ?? 'שגיאה בטעינת העמדות';
+      })
+      .addCase(recommendStations.pending, (state) => {
+        state.loading = true;
+        state.error = null;
+      })
+      .addCase(recommendStations.fulfilled, (state, action) => {
+        state.loading = false;
+        state.recommendations = action.payload;
+        state.hasSearched = true;
+      })
+      .addCase(recommendStations.rejected, (state, action) => {
+        state.loading = false;
+        state.error = action.error.message ?? 'שגיאה בהפעלת אלגוריתם ההמלצות';
       });
   },
 });
 
+export const { clearSearch, setSearchBattery } = stationsSlice.actions;
 export default stationsSlice.reducer;

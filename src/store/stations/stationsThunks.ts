@@ -1,16 +1,33 @@
 import { createAsyncThunk } from '@reduxjs/toolkit';
-import type { Station } from './stationsState';
+import { apiFetch } from '../../api/apiClient';
+import type { RankedStationResult, Station } from './stationsState';
 
-// כתובת השרת (אפשר בהמשך לחבר לכתובת של ה-.NET שלך)
-const API_URL = 'https://jsonplaceholder.typicode.com/posts'; // כתובת דמה לבדיקה כרגע
+export interface DriverPreferenceRequest {
+  driverLatitude: number;
+  driverLongitude: number;
+  batteryPercentage: number;
+  availableTimeMinutes: number;
+  requiredChargerType?: string | null;
+  minRating?: number | null;
+  weightDistance: number;
+  weightRating: number;
+  weightPrice: number;
+  weightSpeed: number;
+}
 
-export const fetchStations = createAsyncThunk(
+export const fetchStations = createAsyncThunk<Station[]>(
   'stations/fetchStations',
   async () => {
-    const response = await fetch(API_URL);
-    if (!response.ok) {
-      throw new Error('Failed to load stations');
-    }
-    return (await response.json()) as Station[];
+    return await apiFetch<Station[]>('/ChargingStations');
+  }
+);
+
+export const recommendStations = createAsyncThunk<RankedStationResult[], DriverPreferenceRequest>(
+  'stations/recommendStations',
+  async (preferences) => {
+    return await apiFetch<RankedStationResult[]>('/ChargingStations/recommend', {
+      method: 'POST',
+      body: JSON.stringify(preferences),
+    });
   }
 );
