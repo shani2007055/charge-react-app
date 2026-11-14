@@ -1,107 +1,41 @@
-import React, { useState } from 'react';
+import { useAppSelector, useAppDispatch } from '../store/hooks';
+import { addCommunityPoints } from '../store/user/userSlice';
 
 export default function UserProfileScreen() {
-  // הפיכת השדה למבוקר (Controlled Input) עם אפשרות עדכון
-  const [carModel, setCarModel] = useState<string>('Tesla Model 3 Long Range');
-  const [communityPoints] = useState<number>(150);
-  const [isEditing, setIsEditing] = useState<boolean>(false);
-  const [successMessage, setSuccessMessage] = useState<string>('');
-
-  // טיפול בשמירת השינויים בטופס
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault(); // מניעת רענון הדף
-    setIsEditing(false);
-    setSuccessMessage('פרטי הפרופיל עודכנו בהצלחה!');
-    
-    // הסרת הודעת ההצלחה אחרי כמה שניות
-    setTimeout(() => {
-      setSuccessMessage('');
-    }, 3000);
-  };
+  // שאיפת נתונים מתוך ה-Store המרכזי בעזרת ההוק המקוצר שלמדת
+  const { name, carModel, communityPoints } = useAppSelector((state) => state.user);
+  const dispatch = useAppDispatch();
 
   return (
     <div className="container" dir="rtl">
       <div className="screen-view">
         
         <div className="screen-header">
-          <span>פרופיל משתמש ונקודות קהילה</span>
+          <span>👤 פרופיל משתמש (מנוהל ע"י Redux)</span>
         </div>
 
-        <div style={{ maxWidth: '500px', margin: '0 auto' }}>
+        <div style={{ maxWidth: '500px', margin: '0 auto', background: '#121212', padding: '20px', borderRadius: '10px', color: 'white', border: '1px solid #333' }}>
           
-          {/* הודעת הצלחה מותנית */}
-          {successMessage && (
-            <div style={{ background: '#062f22', color: 'var(--primary)', padding: '10px', borderRadius: '8px', marginBottom: '15px', textAlign: 'center', border: '1px solid var(--primary)' }}>
-              {successMessage}
-            </div>
-          )}
+          <h2 style={{ marginBottom: '15px' }}>שלום, {name}</h2>
+          
+          <div style={{ marginBottom: '10px', fontSize: '1rem' }}>
+            🚗 דגם רכב: <strong>{carModel}</strong>
+          </div>
+          
+          <div style={{ marginBottom: '20px', fontSize: '1rem' }}>
+            ⭐ נקודות קהילה: <strong style={{ color: 'var(--primary)' }}>{communityPoints}</strong>
+          </div>
 
-          <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label>דגם רכב:</label>
-              <input 
-                type="text" 
-                className="form-control" 
-                value={carModel} 
-                onChange={(e) => setCarModel(e.target.value)} 
-                readOnly={!isEditing} // ניתן לעריכה רק במצב עריכה
-                style={{ 
-                  textAlign: 'center', 
-                  fontWeight: 'bold', 
-                  background: isEditing ? '#1e1e1e' : '#121212',
-                  border: isEditing ? '1px solid var(--accent-blue)' : '1px solid var(--card-border)'
-                }}
-              />
-            </div>
-
-            <div className="form-group">
-              <label>נקודות קהילה ובונוסים:</label>
-              <input 
-                type="text" 
-                className="form-control" 
-                value={`${communityPoints} נקודות`} 
-                readOnly 
-                style={{ 
-                  color: 'var(--primary)', 
-                  fontWeight: 'bold', 
-                  fontSize: '1.2rem',
-                  textAlign: 'center',
-                  background: '#121212'
-                }}
-              />
-            </div>
-
-            {/* כפתורי שליטה במצב עריכה */}
-            {!isEditing ? (
-              <button 
-                type="button" 
-                className="btn" 
-                style={{ marginTop: '10px', background: '#333', cursor: 'pointer' }}
-                onClick={() => setIsEditing(true)}
-              >
-                ערוך פרטי רכב ✏️
-              </button>
-            ) : (
-              <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
-                <button 
-                  type="submit" 
-                  className="btn" 
-                  style={{ flex: 1, background: 'var(--primary)', color: 'black', fontWeight: 'bold', cursor: 'pointer' }}
-                >
-                  שמור שינויים ✓
-                </button>
-                <button 
-                  type="button" 
-                  className="btn" 
-                  style={{ flex: 1, background: '#4b5563', cursor: 'pointer' }}
-                  onClick={() => setIsEditing(false)}
-                >
-                  ביטול
-                </button>
-              </div>
-            )}
-          </form>
-
+          {/* כפתור שמפעיל dispatch ומעדכן את הסטייט המרכזי ב-Store */}
+          <button 
+            type="button"
+            className="btn" 
+            style={{ cursor: 'pointer' }}
+            onClick={() => dispatch(addCommunityPoints(10))}
+          >
+            + הוסף 10 נקודות קהילה ל-Redux
+          </button>
+          
         </div>
 
       </div>

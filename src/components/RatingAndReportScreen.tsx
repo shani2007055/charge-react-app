@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAppDispatch } from '../store/hooks';
+import { addCommunityPoints } from '../store/user/userSlice';
 
 export default function RatingAndReportScreen() {
   const [rating, setRating] = useState<number>(5);
@@ -10,22 +12,27 @@ export default function RatingAndReportScreen() {
   const [earnedPoints, setEarnedPoints] = useState<number>(10);
 
   const navigate = useNavigate();
+  const dispatch = useAppDispatch(); // חיבור ל-dispatch של Redux
 
   // טיפול בשליחת דירוג וחוות דעת
   const handleSubmitRating = (e: React.FormEvent) => {
     e.preventDefault();
-    setEarnedPoints(10);
+    const points = 10;
+    setEarnedPoints(points);
+    dispatch(addCommunityPoints(points)); // עדכון הנקודות ב-Store המרכזי!
     setIsSubmitted(true);
   };
 
   // טיפול בשליחת דיווח תקלה
   const handleSubmitReport = (e: React.FormEvent) => {
     e.preventDefault();
-    setEarnedPoints(20);
+    const points = 20;
+    setEarnedPoints(points);
+    dispatch(addCommunityPoints(points)); // עדכון הנקודות ב-Store המרכזי!
     setIsSubmitted(true);
   };
 
-  // מסך הצלחה מותנה (Conditional Rendering) לאחר שליחת משוב או דיווח
+  // מסך הצלחה מותנה לאחר שליחת משוב או דיווח
   if (isSubmitted) {
     return (
       <div className="container" dir="rtl">
@@ -76,13 +83,13 @@ export default function RatingAndReportScreen() {
 
         <div style={{ maxWidth: '550px', margin: '0 auto' }}>
           
-          {/* קופסת דירוג מוגנת ב-form לפי כללי ה-Controlled Inputs והאירועים */}
+          {/* קופסת דירוג */}
           <form onSubmit={handleSubmitRating} style={{ background: '#121212', padding: '24px', borderRadius: '16px', border: '1px solid var(--card-border)', marginBottom: '20px', textAlign: 'center' }}>
             <h3 style={{ marginTop: 0, color: 'var(--text-main)', fontSize: '1.1rem', marginBottom: '15px' }}>
               ⭐ הטרמינל פנוי? דרג את חוויות הטעינה:
             </h3>
 
-            {/* כוכבים אינטראקטיביים עם אנימציה */}
+            {/* כוכבים אינטראקטיביים */}
             <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginBottom: '20px', direction: 'ltr' }}>
               {[1, 2, 3, 4, 5].map((star) => (
                 <span 
@@ -123,7 +130,7 @@ export default function RatingAndReportScreen() {
             </button>
           </form>
 
-          {/* קופסת דיווח תקלות (אדומה ומודגשת) המוגנת ב-form */}
+          {/* קופסת דיווח תקלות */}
           <form onSubmit={handleSubmitReport} style={{ background: '#180505', padding: '24px', borderRadius: '16px', border: '1.5px solid var(--danger)', textAlign: 'right' }}>
             <h4 style={{ marginTop: 0, color: '#f87171', fontSize: '1.05rem', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               ⚠️ זיהית תקלה בעמדה? דווח לנו (וקבל 20 נקודות בונוס!):
