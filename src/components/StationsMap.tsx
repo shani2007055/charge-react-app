@@ -36,8 +36,8 @@ export default function StationsMap({
       zoom: 11,
     });
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap &copy; CARTO',
     }).addTo(map);
 
     const layerGroup = L.layerGroup().addTo(map);
@@ -62,13 +62,15 @@ export default function StationsMap({
     if (driverLocation) {
       const driverIcon = L.divIcon({
         className: '',
-        html: '<div style="width:32px;height:32px;border-radius:50%;background:#2563eb;border:3px solid white;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,0.5);">🚗</div>',
-        iconSize: [32, 32],
-        iconAnchor: [16, 16],
+        html: '<div style="width:28px;height:28px;border-radius:9999px;background:#0F172A;border:3px solid #FFFFFF;display:flex;align-items:center;justify-content:center;color:#FFFFFF;font-size:11px;font-weight:700;box-shadow:0 4px 12px rgba(15,23,42,0.28);font-family:Heebo,sans-serif;">אני</div>',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
       });
 
       const driverMarker = L.marker([driverLocation.lat, driverLocation.lng], { icon: driverIcon });
-      driverMarker.bindPopup('<div dir="rtl" style="font-weight:bold;">📍 המיקום שלך</div>');
+      driverMarker.bindPopup(
+        '<div dir="rtl" style="font-weight:600;color:#0F172A;font-family:Heebo,sans-serif;">המיקום שלך</div>'
+      );
       driverMarker.addTo(layerGroup);
       boundsPoints.push([driverLocation.lat, driverLocation.lng]);
     }
@@ -76,23 +78,25 @@ export default function StationsMap({
     stations.forEach((item) => {
       const { station, distanceKm, matchPercentage } = item;
       const isFaulty = !station.isActive || station.currentStatus === 'Faulty';
-      const bgColor = isFaulty ? '#dc2626' : '#16a34a';
-      const symbol = isFaulty ? '⚠️' : '⚡';
+      const bgColor = isFaulty ? '#DC2626' : '#EA580C';
 
       const stationIcon = L.divIcon({
         className: '',
-        html: `<div style="width:34px;height:34px;border-radius:50%;background:${bgColor};border:2px solid white;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,0.5);">${symbol}</div>`,
-        iconSize: [34, 34],
-        iconAnchor: [17, 17],
+        html: `<div style="padding:4px 8px;border-radius:8px;background:${bgColor};border:2px solid #FFFFFF;color:#FFFFFF;font-size:11px;font-weight:700;white-space:nowrap;box-shadow:0 4px 12px rgba(15,23,42,0.22);font-family:Heebo,sans-serif;">${
+          isFaulty ? 'תקלה' : `${station.maxKw}kW`
+        }</div>`,
+        iconSize: [52, 26],
+        iconAnchor: [26, 13],
       });
 
       const popupContainer = document.createElement('div');
       popupContainer.setAttribute('dir', 'rtl');
-      popupContainer.style.minWidth = '190px';
-      popupContainer.style.fontFamily = 'inherit';
+      popupContainer.style.minWidth = '200px';
+      popupContainer.style.fontFamily = 'Heebo, system-ui, sans-serif';
+      popupContainer.style.color = '#0F172A';
 
       const title = document.createElement('div');
-      title.style.fontWeight = 'bold';
+      title.style.fontWeight = '700';
       title.style.fontSize = '14px';
       title.style.marginBottom = '4px';
       title.textContent = station.name;
@@ -102,15 +106,17 @@ export default function StationsMap({
       addr.style.fontSize = '12px';
       addr.style.color = '#475569';
       addr.style.marginBottom = '6px';
-      addr.textContent = `📍 ${station.address}`;
+      addr.textContent = station.address;
       popupContainer.appendChild(addr);
 
       const details = document.createElement('div');
       details.style.fontSize = '12px';
-      details.style.marginBottom = '8px';
-      const matchText = matchPercentage !== undefined ? `🎯 ${matchPercentage}% התאמה | ` : '';
-      const distText = distanceKm !== undefined ? `📏 ${distanceKm} ק"מ | ` : '';
-      details.textContent = `${matchText}${distText}🔌 ${station.chargerType} • ₪${station.pricePerKwh}`;
+      details.style.color = '#0F172A';
+      details.style.fontWeight = '500';
+      details.style.marginBottom = '10px';
+      const matchText = matchPercentage !== undefined ? `${matchPercentage}% התאמה · ` : '';
+      const distText = distanceKm !== undefined ? `${distanceKm} ק"מ · ` : '';
+      details.textContent = `${matchText}${distText}${station.chargerType} · ₪${station.pricePerKwh}`;
       popupContainer.appendChild(details);
 
       if (!isFaulty) {
@@ -121,15 +127,16 @@ export default function StationsMap({
             ? 'משריין...'
             : hasActiveBooking
               ? 'קיימת הזמנה פעילה'
-              : '⚡ שריין עמדה זו';
+              : 'שריין עמדה (15 דק׳)';
         reserveBtn.disabled = hasActiveBooking || reservingId === station.id;
         reserveBtn.style.width = '100%';
-        reserveBtn.style.padding = '6px 10px';
+        reserveBtn.style.padding = '7px 12px';
         reserveBtn.style.border = 'none';
-        reserveBtn.style.borderRadius = '6px';
-        reserveBtn.style.background = hasActiveBooking ? '#64748b' : '#16a34a';
-        reserveBtn.style.color = 'white';
-        reserveBtn.style.fontWeight = 'bold';
+        reserveBtn.style.borderRadius = '8px';
+        reserveBtn.style.background = hasActiveBooking ? '#94A3B8' : '#0F172A';
+        reserveBtn.style.color = '#FFFFFF';
+        reserveBtn.style.fontWeight = '600';
+        reserveBtn.style.fontSize = '12px';
         reserveBtn.style.cursor = hasActiveBooking ? 'not-allowed' : 'pointer';
         reserveBtn.addEventListener('click', () => onReserve(station));
         popupContainer.appendChild(reserveBtn);
@@ -142,7 +149,7 @@ export default function StationsMap({
     });
 
     if (boundsPoints.length > 0) {
-      map.fitBounds(L.latLngBounds(boundsPoints), { padding: [40, 40], maxZoom: 14 });
+      map.fitBounds(L.latLngBounds(boundsPoints), { padding: [36, 36], maxZoom: 13 });
     }
   }, [stations, driverLocation, hasActiveBooking, reservingId, onReserve]);
 
@@ -151,11 +158,10 @@ export default function StationsMap({
       ref={containerRef}
       style={{
         width: '100%',
-        height: '340px',
+        height: '440px',
         borderRadius: '12px',
         overflow: 'hidden',
-        border: '1px solid #334155',
-        marginBottom: '16px',
+        border: '1px solid var(--ev-border)',
       }}
     />
   );

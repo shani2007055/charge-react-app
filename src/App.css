@@ -1,19 +1,23 @@
 :root {
-  /* פלטת הצבעים החדשה — קנבס בהיר ונקי + טורקיז EV */
-  --ev-bg: #f6f8fa;
-  --ev-surface: #ffffff;
+  /* פחם וכתום-אנרגיה + רקע B */
+  --ev-bg: #f3f6fa;
+  --ev-surface: rgba(255, 255, 255, 0.94);
+  --ev-surface-solid: #ffffff;
   --ev-surface-subtle: #f1f5f9;
-  --ev-border: #e2e8f0;
+  --ev-border: rgba(226, 232, 240, 0.92);
   --ev-border-strong: #cbd5e1;
 
   --ev-ink: #0f172a;
   --ev-ink-muted: #475569;
   --ev-ink-soft: #64748b;
 
-  --ev-brand: #0d9488;
-  --ev-brand-hover: #0f766e;
-  --ev-brand-soft: #f0fdfa;
-  --ev-brand-border: #99f6e4;
+  --ev-brand: #ea580c;
+  --ev-brand-hover: #c2410c;
+  --ev-brand-soft: #fff7ed;
+  --ev-brand-border: #fed7aa;
+
+  --ev-cta: #0f172a;
+  --ev-cta-hover: #1e293b;
 
   --ev-success: #16a34a;
   --ev-warning: #d97706;
@@ -21,14 +25,14 @@
   --ev-danger-soft: #fef2f2;
   --ev-danger-border: #fecaca;
 
-  /* תאימות לאחור לשמות משתנים קיימים ברכיבים שטרם עודכנו */
-  --bg-dark: #f6f8fa;
+  /* תאימות לאחור לרכיבים שעוד יעודכנו בהמשך */
+  --bg-dark: #f3f6fa;
   --card-bg: #ffffff;
   --card-border: #e2e8f0;
-  --primary: #0d9488;
-  --primary-hover: #0f766e;
-  --accent-blue: #0d9488;
-  --light-blue: #0f766e;
+  --primary: #ea580c;
+  --primary-hover: #c2410c;
+  --accent-blue: #0f172a;
+  --light-blue: #ea580c;
   --green-dark: #15803d;
   --text-main: #0f172a;
   --text-muted: #475569;
@@ -46,21 +50,36 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* מעטפת אפליקציה ו-Header עליון */
+/* מעטפת אפליקציה — רקע B עם הילה רכה */
 .ev-app-shell {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background-color: var(--ev-bg);
+  position: relative;
+  overflow-x: hidden;
   color: var(--ev-ink);
+  background-color: var(--ev-bg);
+  background-image:
+    radial-gradient(at 80% 15%, rgba(234, 88, 12, 0.1) 0px, transparent 50%),
+    radial-gradient(at 18% 75%, rgba(245, 158, 11, 0.08) 0px, transparent 45%);
+}
+
+.ev-bg-contours {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.12;
+  z-index: 0;
 }
 
 .ev-header {
   position: sticky;
   top: 0;
   z-index: 30;
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(8px);
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--ev-border);
 }
 
@@ -143,6 +162,8 @@
 }
 
 .ev-main {
+  position: relative;
+  z-index: 1;
   flex: 1;
   width: 100%;
   max-width: 1160px;
@@ -150,7 +171,7 @@
   padding: 24px 20px 88px;
 }
 
-/* מחלקות בסיס משותפות למסכים */
+/* מעטפת וכרטיסים מורמים */
 .container {
   max-width: 1120px;
   margin: 0 auto;
@@ -160,16 +181,21 @@
 .ev-card,
 .screen-view {
   background: var(--ev-surface);
+  backdrop-filter: blur(8px);
   border: 1px solid var(--ev-border);
   border-radius: 14px;
   padding: 24px;
   color: var(--ev-ink);
+  box-shadow:
+    0 10px 30px -10px rgba(15, 23, 42, 0.08),
+    0 2px 6px -1px rgba(15, 23, 42, 0.04);
 }
 
 .screen-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   padding-bottom: 16px;
   margin-bottom: 20px;
@@ -205,7 +231,7 @@
 .ev-input {
   width: 100%;
   padding: 10px 14px;
-  background: var(--ev-surface);
+  background: var(--ev-surface-solid);
   border: 1px solid var(--ev-border);
   border-radius: 9px;
   font-family: var(--font-sans);
@@ -220,17 +246,17 @@
 .ev-input:focus {
   outline: none;
   border-color: var(--ev-brand);
-  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.12);
+  box-shadow: 0 0 0 3px rgba(234, 88, 12, 0.12);
 }
 
-/* כפתורים */
+/* כפתורים — כפתור ראשי בפחם עמוק עם hover נקי */
 .btn,
 .ev-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  background: var(--ev-brand);
+  background: var(--ev-cta);
   color: #ffffff;
   border: 1px solid transparent;
   padding: 11px 18px;
@@ -246,7 +272,7 @@
 
 .btn:hover:not(:disabled),
 .ev-btn:hover:not(:disabled) {
-  background: var(--ev-brand-hover);
+  background: var(--ev-cta-hover);
 }
 
 .btn:disabled,
@@ -261,23 +287,23 @@
   font-size: 0.84rem;
 }
 
+.ev-btn-accent {
+  background: var(--ev-brand);
+  color: #ffffff;
+}
+
+.ev-btn-accent:hover:not(:disabled) {
+  background: var(--ev-brand-hover);
+}
+
 .ev-btn-secondary {
-  background: var(--ev-surface);
+  background: var(--ev-surface-solid);
   color: var(--ev-ink);
   border: 1px solid var(--ev-border);
 }
 
 .ev-btn-secondary:hover:not(:disabled) {
   background: var(--ev-surface-subtle);
-}
-
-.ev-btn-dark {
-  background: var(--ev-ink);
-  color: #ffffff;
-}
-
-.ev-btn-dark:hover:not(:disabled) {
-  background: #1e293b;
 }
 
 .ev-btn-danger {
@@ -290,7 +316,7 @@
   background: #fee2e2;
 }
 
-/* טאבים ובקרת סגמנטים */
+/* טאבים ופילטרים */
 .auth-toggle {
   display: flex;
   gap: 6px;
@@ -316,9 +342,9 @@
 }
 
 .auth-toggle-btn.active {
-  background: var(--ev-surface);
+  background: var(--ev-surface-solid);
   color: var(--ev-ink);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 /* הודעות שגיאה וסטטוס */
@@ -336,7 +362,7 @@
 .ev-alert-brand {
   background: var(--ev-brand-soft);
   border: 1px solid var(--ev-brand-border);
-  color: #115e59;
+  color: #9a3412;
   padding: 12px 16px;
   border-radius: 10px;
   font-size: 0.88rem;

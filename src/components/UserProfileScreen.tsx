@@ -32,6 +32,14 @@ type ChargerType = 'CCS' | 'Type2';
 
 const ISRAELI_PHONE_REGEX = /^0\d{1,2}-?\d{7}$/;
 
+const subtleLabelStyle = {
+  display: 'block',
+  marginBottom: '4px',
+  fontSize: '0.76rem',
+  fontWeight: 600,
+  color: '#64748B',
+} as const;
+
 export default function UserProfileScreen() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
@@ -276,76 +284,70 @@ export default function UserProfileScreen() {
 
   return (
     <div className="container" dir="rtl">
-      <div className="screen-view">
+      <div className="screen-view" style={{ maxWidth: '760px', margin: '0 auto' }}>
         <div className="screen-header">
-          <span>👤 פרופיל משתמש וניהול רכבים</span>
+          <div>
+            <h1 style={{ margin: 0, fontSize: '1.35rem', color: 'var(--ev-text)' }}>
+              פרופיל משתמש וניהול רכבים
+            </h1>
+            <p style={{ margin: '4px 0 0', fontSize: '0.88rem', color: 'var(--ev-text-muted)' }}>
+              עדכון פרטים אישיים ונתוני הסוללה של הרכבים שלך
+            </p>
+          </div>
+          <span className="ev-badge ev-badge-orange">
+            {role === 'Owner' ? 'בעל עמדה' : 'נהג'}
+          </span>
         </div>
 
         {loading && (
-          <div style={{ textAlign: 'center', color: 'white', padding: '24px' }}>
+          <div style={{ textAlign: 'center', color: 'var(--ev-text-muted)', padding: '28px' }}>
             טוען פרטי פרופיל...
           </div>
         )}
 
         {error && (
-          <div
-            style={{
-              maxWidth: '650px',
-              margin: '0 auto 16px auto',
-              background: '#4a1818',
-              color: '#ff9c9c',
-              padding: '12px 16px',
-              borderRadius: '8px',
-              border: '1px solid #8a2b2b',
-            }}
-          >
-            ⚠️ {error}
+          <div className="ev-alert ev-alert-error" style={{ marginBottom: '16px' }}>
+            {error}
           </div>
         )}
 
         {successMessage && (
-          <div
-            style={{
-              maxWidth: '650px',
-              margin: '0 auto 16px auto',
-              background: '#133d24',
-              color: '#7ef2a9',
-              padding: '12px 16px',
-              borderRadius: '8px',
-              border: '1px solid #257a47',
-            }}
-          >
-            ✅ {successMessage}
+          <div className="ev-alert ev-alert-success" style={{ marginBottom: '16px' }}>
+            {successMessage}
           </div>
         )}
 
         {!loading && profile && (
-          <div style={{ maxWidth: '650px', margin: '0 auto', display: 'grid', gap: '20px' }}>
+          <div style={{ display: 'grid', gap: '20px' }}>
             {/* כרטיס פרטים אישיים */}
-            <div
-              style={{
-                background: '#121212',
-                padding: '20px',
-                borderRadius: '10px',
-                color: 'white',
-                border: '1px solid #333',
-              }}
-            >
+            <div className="ev-card" style={{ padding: '22px' }}>
               <div
                 style={{
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  marginBottom: '15px',
-                  gap: '10px',
+                  marginBottom: '16px',
+                  gap: '12px',
+                  flexWrap: 'wrap',
                 }}
               >
-                <h2 style={{ margin: 0, color: 'white' }}>שלום, {profile.name}</h2>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: '1.15rem', color: 'var(--ev-text)' }}>
+                    שלום, {profile.name}
+                  </h2>
+                  <div style={{ fontSize: '0.82rem', color: 'var(--ev-text-muted)', marginTop: '4px' }}>
+                    פרופילים משויכים:{' '}
+                    {profile.driverId !== null ? 'נהג' : ''}
+                    {profile.driverId !== null && profile.ownerId !== null ? ' · ' : ''}
+                    {profile.ownerId !== null ? 'בעל עמדות' : ''}
+                  </div>
+                </div>
+
                 {!isEditingProfile && (
                   <button
                     type="button"
-                    className="btn"
-                    style={{ width: 'auto', padding: '8px 14px' }}
+                    className="ev-btn ev-btn-secondary"
+                    style={{ width: 'auto', padding: '8px 14px', fontSize: '0.86rem' }}
                     onClick={() => {
                       setEditName(profile.name);
                       setEditPhone(profile.phone);
@@ -354,76 +356,97 @@ export default function UserProfileScreen() {
                       setSuccessMessage(null);
                     }}
                   >
-                    ✏️ ערוך פרטים
+                    ערוך פרטים
                   </button>
                 )}
               </div>
 
               {!isEditingProfile ? (
-                <div style={{ display: 'grid', gap: '8px', fontSize: '0.98rem' }}>
-                  <div>
-                    📧 אימייל: <strong>{profile.email}</strong>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+                    gap: '12px',
+                  }}
+                >
+                  <div
+                    style={{
+                      background: '#F8FAFC',
+                      border: '1px solid var(--ev-border)',
+                      borderRadius: '10px',
+                      padding: '12px',
+                    }}
+                  >
+                    <div style={{ fontSize: '0.76rem', color: 'var(--ev-text-muted)' }}>אימייל</div>
+                    <div style={{ fontWeight: 600, color: 'var(--ev-text)', marginTop: '2px' }}>
+                      {profile.email}
+                    </div>
                   </div>
-                  <div>
-                    📱 טלפון: <strong>{profile.phone || 'לא הוזן'}</strong>
+                  <div
+                    style={{
+                      background: '#F8FAFC',
+                      border: '1px solid var(--ev-border)',
+                      borderRadius: '10px',
+                      padding: '12px',
+                    }}
+                  >
+                    <div style={{ fontSize: '0.76rem', color: 'var(--ev-text-muted)' }}>טלפון</div>
+                    <div
+                      className="font-mono-num"
+                      style={{ fontWeight: 600, color: 'var(--ev-text)', marginTop: '2px' }}
+                    >
+                      {profile.phone || 'לא הוזן'}
+                    </div>
                   </div>
-                  <div>
-                    🎭 מצב פעיל: <strong>{role === 'Owner' ? 'בעל עמדה' : 'נהג'}</strong>
-                  </div>
-                  <div style={{ fontSize: '0.9rem', color: '#bbb', marginTop: '4px' }}>
-                    פרופילים משויכים:{' '}
-                    {profile.driverId !== null ? '🚗 נהג ' : ''}
-                    {profile.ownerId !== null ? '⚡ בעל עמדות' : ''}
+                  <div
+                    style={{
+                      background: '#F8FAFC',
+                      border: '1px solid var(--ev-border)',
+                      borderRadius: '10px',
+                      padding: '12px',
+                    }}
+                  >
+                    <div style={{ fontSize: '0.76rem', color: 'var(--ev-text-muted)' }}>מצב פעיל</div>
+                    <div style={{ fontWeight: 600, color: 'var(--ev-accent)', marginTop: '2px' }}>
+                      {role === 'Owner' ? 'בעל עמדה' : 'נהג'}
+                    </div>
                   </div>
                 </div>
               ) : (
                 <form onSubmit={handleSaveProfile} style={{ display: 'grid', gap: '12px' }}>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.9rem' }}>
-                      שם מלא
-                    </label>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={subtleLabelStyle}>שם מלא</label>
                     <input
                       type="text"
+                      className="form-control"
                       value={editName}
                       onChange={(e) => setEditName(e.target.value)}
                       required
-                      style={{
-                        width: '100%',
-                        padding: '10px',
-                        borderRadius: '6px',
-                        border: '1px solid #444',
-                        background: '#1e1e1e',
-                        color: 'white',
-                      }}
                     />
                   </div>
-                  <div>
-                    <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.9rem' }}>
-                      טלפון (למשל 050-1234567)
-                    </label>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label style={subtleLabelStyle}>טלפון (למשל 050-1234567)</label>
                     <input
                       type="tel"
+                      className="form-control font-mono-num"
                       value={editPhone}
                       onChange={(e) => setEditPhone(e.target.value)}
                       required
-                      style={{
-                        width: '100%',
-                        padding: '10px',
-                        borderRadius: '6px',
-                        border: '1px solid #444',
-                        background: '#1e1e1e',
-                        color: 'white',
-                      }}
                     />
                   </div>
                   <div style={{ display: 'flex', gap: '10px' }}>
-                    <button type="submit" className="btn" disabled={savingProfile}>
-                      {savingProfile ? 'שומר...' : '💾 שמור שינויים'}
+                    <button
+                      type="submit"
+                      className="ev-btn ev-btn-primary"
+                      style={{ width: 'auto' }}
+                      disabled={savingProfile}
+                    >
+                      {savingProfile ? 'שומר...' : 'שמור שינויים'}
                     </button>
                     <button
                       type="button"
-                      className="btn"
-                      style={{ background: '#444' }}
+                      className="ev-btn ev-btn-secondary"
+                      style={{ width: 'auto' }}
                       onClick={() => setIsEditingProfile(false)}
                     >
                       ביטול
@@ -435,28 +458,24 @@ export default function UserProfileScreen() {
 
             {/* כרטיס ניהול רכבים (לנהגים) */}
             {profile.driverId !== null && (
-              <div
-                style={{
-                  background: '#121212',
-                  padding: '20px',
-                  borderRadius: '10px',
-                  color: 'white',
-                  border: '1px solid #333',
-                }}
-              >
+              <div className="ev-card" style={{ padding: '22px' }}>
                 <div
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
-                    marginBottom: '15px',
+                    marginBottom: '16px',
+                    gap: '10px',
+                    flexWrap: 'wrap',
                   }}
                 >
-                  <h3 style={{ margin: 0, color: 'white' }}>🚗 הרכבים שלי</h3>
+                  <h3 style={{ margin: 0, fontSize: '1.08rem', color: 'var(--ev-text)' }}>
+                    הרכבים שלי ({vehicles.length})
+                  </h3>
                   <button
                     type="button"
-                    className="btn"
-                    style={{ width: 'auto', padding: '8px 14px' }}
+                    className="ev-btn ev-btn-accent"
+                    style={{ width: 'auto', padding: '8px 14px', fontSize: '0.86rem' }}
                     onClick={() => {
                       setShowAddVehicle((prev) => !prev);
                       setError(null);
@@ -471,95 +490,81 @@ export default function UserProfileScreen() {
                   <form
                     onSubmit={handleAddVehicle}
                     style={{
-                      background: '#1b1b1b',
-                      padding: '15px',
-                      borderRadius: '8px',
-                      border: '1px solid #333',
+                      background: '#F8FAFC',
+                      padding: '16px',
+                      borderRadius: '12px',
+                      border: '1px solid var(--ev-border)',
                       marginBottom: '16px',
                       display: 'grid',
-                      gap: '10px',
+                      gap: '12px',
                     }}
                   >
-                    <input
-                      type="text"
-                      placeholder="דגם רכב (למשל Tesla Model 3 / BYD Atto 3)"
-                      value={newModel}
-                      onChange={(e) => setNewModel(e.target.value)}
-                      required
+                    <div className="form-group" style={{ marginBottom: 0 }}>
+                      <label style={subtleLabelStyle}>דגם רכב</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        placeholder="למשל Tesla Model 3 / BYD Atto 3"
+                        value={newModel}
+                        onChange={(e) => setNewModel(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div
                       style={{
-                        padding: '10px',
-                        borderRadius: '6px',
-                        border: '1px solid #444',
-                        background: '#121212',
-                        color: 'white',
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                        gap: '10px',
                       }}
-                    />
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
-                      <div>
-                        <label style={{ fontSize: '0.8rem', color: '#bbb' }}>סוג שקע</label>
+                    >
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label style={subtleLabelStyle}>סוג שקע</label>
                         <select
+                          className="form-control"
                           value={newChargerType}
                           onChange={(e) => setNewChargerType(e.target.value as ChargerType)}
-                          style={{
-                            width: '100%',
-                            padding: '8px',
-                            borderRadius: '6px',
-                            border: '1px solid #444',
-                            background: '#121212',
-                            color: 'white',
-                          }}
                         >
                           <option value="CCS">CCS (מהיר)</option>
                           <option value="Type2">Type2 (רגיל)</option>
                         </select>
                       </div>
-                      <div>
-                        <label style={{ fontSize: '0.8rem', color: '#bbb' }}>קיבולת (kWh)</label>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label style={subtleLabelStyle}>קיבולת סוללה (kWh)</label>
                         <input
                           type="number"
+                          className="form-control font-mono-num"
                           min={1}
                           max={300}
                           value={newCapacityKwh}
                           onChange={(e) => setNewCapacityKwh(e.target.value)}
                           required
-                          style={{
-                            width: '100%',
-                            padding: '8px',
-                            borderRadius: '6px',
-                            border: '1px solid #444',
-                            background: '#121212',
-                            color: 'white',
-                          }}
                         />
                       </div>
-                      <div>
-                        <label style={{ fontSize: '0.8rem', color: '#bbb' }}>סוללה כעת (%)</label>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label style={subtleLabelStyle}>סוללה כעת (%)</label>
                         <input
                           type="number"
+                          className="form-control font-mono-num"
                           min={0}
                           max={100}
                           value={newCurrentBattery}
                           onChange={(e) => setNewCurrentBattery(e.target.value)}
                           required
-                          style={{
-                            width: '100%',
-                            padding: '8px',
-                            borderRadius: '6px',
-                            border: '1px solid #444',
-                            background: '#121212',
-                            color: 'white',
-                          }}
                         />
                       </div>
                     </div>
-                    <button type="submit" className="btn" disabled={savingNewVehicle}>
-                      {savingNewVehicle ? 'מוסיף...' : '✅ שמור רכב חדש'}
+                    <button
+                      type="submit"
+                      className="ev-btn ev-btn-primary"
+                      disabled={savingNewVehicle}
+                    >
+                      {savingNewVehicle ? 'מוסיף...' : 'שמור רכב חדש'}
                     </button>
                   </form>
                 )}
 
                 {vehicles.length === 0 ? (
-                  <p style={{ color: '#aaa', margin: 0 }}>
+                  <p style={{ color: 'var(--ev-text-muted)', margin: 0, fontSize: '0.92rem' }}>
                     עדיין לא הוגדר רכב. אפשר להוסיף כאן או שהמערכת תיצור רכב ברירת מחדל בשריון הראשון.
                   </p>
                 ) : (
@@ -568,98 +573,85 @@ export default function UserProfileScreen() {
                       <div
                         key={vehicle.id}
                         style={{
-                          background: '#1a1a1a',
-                          padding: '14px',
-                          borderRadius: '8px',
-                          border: '1px solid #2e2e2e',
+                          background: '#FFFFFF',
+                          padding: '15px',
+                          borderRadius: '12px',
+                          border: '1px solid var(--ev-border)',
                         }}
                       >
                         {editingVehicleId === vehicle.id ? (
                           <form
                             onSubmit={(e) => void handleSaveVehicleEdit(e, vehicle.id)}
-                            style={{ display: 'grid', gap: '10px' }}
+                            style={{ display: 'grid', gap: '12px' }}
                           >
-                            <input
-                              type="text"
-                              value={editModel}
-                              onChange={(e) => setEditModel(e.target.value)}
-                              required
-                              style={{
-                                padding: '8px',
-                                borderRadius: '6px',
-                                border: '1px solid #444',
-                                background: '#121212',
-                                color: 'white',
-                              }}
-                            />
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label style={subtleLabelStyle}>דגם רכב</label>
+                              <input
+                                type="text"
+                                className="form-control"
+                                value={editModel}
+                                onChange={(e) => setEditModel(e.target.value)}
+                                required
+                              />
+                            </div>
                             <div
                               style={{
                                 display: 'grid',
-                                gridTemplateColumns: '1fr 1fr 1fr',
-                                gap: '8px',
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                                gap: '10px',
                               }}
                             >
-                              <select
-                                value={editChargerType}
-                                onChange={(e) =>
-                                  setEditChargerType(e.target.value as ChargerType)
-                                }
-                                style={{
-                                  padding: '8px',
-                                  borderRadius: '6px',
-                                  border: '1px solid #444',
-                                  background: '#121212',
-                                  color: 'white',
-                                }}
-                              >
-                                <option value="CCS">CCS</option>
-                                <option value="Type2">Type2</option>
-                              </select>
-                              <input
-                                type="number"
-                                min={1}
-                                max={300}
-                                value={editCapacityKwh}
-                                onChange={(e) => setEditCapacityKwh(e.target.value)}
-                                title="קיבולת בקוט״ש"
-                                required
-                                style={{
-                                  padding: '8px',
-                                  borderRadius: '6px',
-                                  border: '1px solid #444',
-                                  background: '#121212',
-                                  color: 'white',
-                                }}
-                              />
-                              <input
-                                type="number"
-                                min={0}
-                                max={100}
-                                value={editCurrentBattery}
-                                onChange={(e) => setEditCurrentBattery(e.target.value)}
-                                title="סוללה נוכחית (%)"
-                                required
-                                style={{
-                                  padding: '8px',
-                                  borderRadius: '6px',
-                                  border: '1px solid #444',
-                                  background: '#121212',
-                                  color: 'white',
-                                }}
-                              />
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label style={subtleLabelStyle}>סוג שקע</label>
+                                <select
+                                  className="form-control"
+                                  value={editChargerType}
+                                  onChange={(e) =>
+                                    setEditChargerType(e.target.value as ChargerType)
+                                  }
+                                >
+                                  <option value="CCS">CCS</option>
+                                  <option value="Type2">Type2</option>
+                                </select>
+                              </div>
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label style={subtleLabelStyle}>קיבולת סוללה (kWh)</label>
+                                <input
+                                  type="number"
+                                  className="form-control font-mono-num"
+                                  min={1}
+                                  max={300}
+                                  value={editCapacityKwh}
+                                  onChange={(e) => setEditCapacityKwh(e.target.value)}
+                                  required
+                                />
+                              </div>
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label style={subtleLabelStyle}>סוללה נוכחית (%)</label>
+                                <input
+                                  type="number"
+                                  className="form-control font-mono-num"
+                                  min={0}
+                                  max={100}
+                                  value={editCurrentBattery}
+                                  onChange={(e) => setEditCurrentBattery(e.target.value)}
+                                  required
+                                />
+                              </div>
                             </div>
                             <div style={{ display: 'flex', gap: '8px' }}>
                               <button
                                 type="submit"
-                                className="btn"
+                                className="ev-btn ev-btn-primary"
+                                style={{ width: 'auto' }}
                                 disabled={savingVehicleEdit}
                               >
-                                {savingVehicleEdit ? 'שומר...' : '💾 שמור'}
+                                {savingVehicleEdit ? 'שומר...' : 'שמור'}
                               </button>
                               <button
                                 type="button"
-                                className="btn"
-                                style={{ background: '#444' }}
+                                className="ev-btn ev-btn-secondary"
+                                style={{ width: 'auto' }}
                                 onClick={() => setEditingVehicleId(null)}
                               >
                                 ביטול
@@ -677,37 +669,50 @@ export default function UserProfileScreen() {
                             }}
                           >
                             <div>
-                              <div style={{ fontWeight: 'bold', fontSize: '1.05rem' }}>
+                              <div
+                                style={{
+                                  fontWeight: 700,
+                                  fontSize: '1.02rem',
+                                  color: 'var(--ev-text)',
+                                }}
+                              >
                                 {vehicle.model}
                               </div>
-                              <div style={{ fontSize: '0.9rem', color: '#ccc', marginTop: '4px' }}>
-                                שקע: <strong>{vehicle.supportedChargerType}</strong> | קיבולת:{' '}
-                                <strong>{vehicle.batteryCapacityKwh} kWh</strong> | סוללה נוכחית:{' '}
-                                <strong>{vehicle.currentBattery}%</strong>
+                              <div
+                                style={{
+                                  fontSize: '0.86rem',
+                                  color: 'var(--ev-text-muted)',
+                                  marginTop: '4px',
+                                }}
+                              >
+                                שקע: <strong style={{ color: 'var(--ev-text)' }}>{vehicle.supportedChargerType}</strong>
+                                {' · '}קיבולת:{' '}
+                                <strong className="font-mono-num" style={{ color: 'var(--ev-text)' }}>
+                                  {vehicle.batteryCapacityKwh} kWh
+                                </strong>
+                                {' · '}סוללה נוכחית:{' '}
+                                <strong className="font-mono-num" style={{ color: 'var(--ev-accent)' }}>
+                                  {vehicle.currentBattery}%
+                                </strong>
                               </div>
                             </div>
 
-                            <div style={{ display: 'flex', gap: '8px' }}>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                               <button
                                 type="button"
-                                className="btn"
-                                style={{ width: 'auto', padding: '6px 12px', fontSize: '0.85rem' }}
+                                className="ev-btn ev-btn-secondary"
+                                style={{ width: 'auto', padding: '6px 12px', fontSize: '0.84rem' }}
                                 onClick={() => startEditVehicle(vehicle)}
                               >
-                                ✏️ ערוך
+                                ערוך
                               </button>
 
                               {confirmDeleteId === vehicle.id ? (
                                 <>
                                   <button
                                     type="button"
-                                    className="btn"
-                                    style={{
-                                      width: 'auto',
-                                      padding: '6px 12px',
-                                      fontSize: '0.85rem',
-                                      background: '#b91c1c',
-                                    }}
+                                    className="ev-btn ev-btn-danger"
+                                    style={{ width: 'auto', padding: '6px 12px', fontSize: '0.84rem' }}
                                     disabled={deletingId === vehicle.id}
                                     onClick={() => void handleDeleteVehicle(vehicle.id)}
                                   >
@@ -715,13 +720,8 @@ export default function UserProfileScreen() {
                                   </button>
                                   <button
                                     type="button"
-                                    className="btn"
-                                    style={{
-                                      width: 'auto',
-                                      padding: '6px 12px',
-                                      fontSize: '0.85rem',
-                                      background: '#444',
-                                    }}
+                                    className="ev-btn ev-btn-secondary"
+                                    style={{ width: 'auto', padding: '6px 12px', fontSize: '0.84rem' }}
                                     onClick={() => setConfirmDeleteId(null)}
                                   >
                                     בטל
@@ -730,16 +730,11 @@ export default function UserProfileScreen() {
                               ) : (
                                 <button
                                   type="button"
-                                  className="btn"
-                                  style={{
-                                    width: 'auto',
-                                    padding: '6px 12px',
-                                    fontSize: '0.85rem',
-                                    background: '#7f1d1d',
-                                  }}
+                                  className="ev-btn ev-btn-danger"
+                                  style={{ width: 'auto', padding: '6px 12px', fontSize: '0.84rem' }}
                                   onClick={() => setConfirmDeleteId(vehicle.id)}
                                 >
-                                  🗑️ מחק
+                                  מחק
                                 </button>
                               )}
                             </div>
@@ -753,14 +748,16 @@ export default function UserProfileScreen() {
             )}
 
             {/* התנתקות */}
-            <button
-              type="button"
-              className="btn"
-              style={{ background: '#7f1d1d' }}
-              onClick={handleLogout}
-            >
-              🚪 התנתק מהמערכת
-            </button>
+            <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+              <button
+                type="button"
+                className="ev-btn ev-btn-danger"
+                style={{ width: 'auto', padding: '10px 20px' }}
+                onClick={handleLogout}
+              >
+                התנתק מהמערכת
+              </button>
+            </div>
           </div>
         )}
       </div>

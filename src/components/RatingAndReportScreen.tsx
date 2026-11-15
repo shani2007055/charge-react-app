@@ -105,20 +105,18 @@ export default function RatingAndReportScreen() {
     setError(null);
     setSubmitting(true);
     try {
-      // 1. סימון העמדה כתקולה בלוג הסטטוסים (Faulty) -> מופיע מיד אצל בעל העמדה ומסונן מהאלגוריתם!
       await apiFetch('/StationStatusLogs/report-fault', {
         method: 'POST',
         body: JSON.stringify({ stationId: booking.stationId }),
       });
 
-      // 2. אם עדיין לא נכתבה ביקורת להזמנה זו, נשמור גם את פירוט התקלה כביקורת
       try {
         await apiFetch('/ReviewsToCharge', {
           method: 'POST',
           body: JSON.stringify({
             chargeBookingId: booking.bookingId,
             rating: 1,
-            comment: `⚠️ דיווח תקלה: ${selectedIssue}`,
+            comment: `דיווח תקלה: ${selectedIssue}`,
           }),
         });
       } catch {
@@ -139,35 +137,68 @@ export default function RatingAndReportScreen() {
   if (isSubmitted) {
     return (
       <div className="container" dir="rtl">
-        <div className="screen-view" style={{ textAlign: 'center', padding: '40px 20px' }}>
-          <div style={{ fontSize: '3rem', marginBottom: '10px' }}>⚡ 🎉</div>
-          <h2 style={{ color: 'var(--light-blue)', fontSize: '1.8rem', marginBottom: '10px' }}>
-            תודה רבה! הדיווח נשמר במערכת
-          </h2>
-          <p style={{ color: 'var(--text-muted)', marginBottom: '30px' }}>
-            המשוב שלך מסייע לכל הקהילה למצוא עמדות אמינות ופנויות בזמן אמת.
-          </p>
-          <div style={{
-            background: '#062f22',
-            border: '2px solid var(--primary)',
-            borderRadius: '16px',
-            padding: '20px',
-            maxWidth: '400px',
-            margin: '0 auto 30px auto',
-          }}>
-            <span style={{ color: 'var(--text-main)', fontSize: '1rem', display: 'block', marginBottom: '8px' }}>
-              תגמול קהילה התווסף לחשבונך!
-            </span>
-            <span style={{ color: 'var(--primary)', fontSize: '1.6rem', fontWeight: 'bold' }}>
-              ⭐ +{earnedPoints} נקודות קהילה!
-            </span>
-          </div>
-          <button
-            className="btn"
-            style={{ maxWidth: '400px', margin: '0 auto', padding: '14px', fontSize: '1rem', cursor: 'pointer' }}
-            onClick={() => navigate('/search')}
+        <div
+          className="ev-card"
+          style={{ maxWidth: '520px', margin: '0 auto', textAlign: 'center', padding: '40px 28px' }}
+        >
+          <div
+            style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '999px',
+              background: 'var(--ev-brand-soft)',
+              border: '1px solid var(--ev-brand-border)',
+              color: 'var(--ev-brand)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: '16px',
+            }}
           >
-            🏠 חזרה לחיפוש חדש
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          </div>
+
+          <h2 style={{ margin: '0 0 8px 0', fontSize: '1.35rem', color: 'var(--ev-ink)' }}>
+            תודה רבה, הדיווח נשמר במערכת
+          </h2>
+          <p style={{ margin: '0 0 24px 0', fontSize: '0.9rem', color: 'var(--ev-ink-muted)' }}>
+            המשוב שלך עוזר לכל הנהגים למצוא עמדות אמינות ופנויות בזמן אמת.
+          </p>
+
+          <div
+            style={{
+              background: 'var(--ev-brand-soft)',
+              border: '1px solid var(--ev-brand-border)',
+              borderRadius: '12px',
+              padding: '16px 20px',
+              marginBottom: '24px',
+            }}
+          >
+            <div style={{ fontSize: '0.84rem', color: 'var(--ev-ink-muted)', marginBottom: '4px' }}>
+              תגמול קהילה התווסף לחשבונך
+            </div>
+            <div
+              className="font-mono-num"
+              style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--ev-brand)' }}
+            >
+              +{earnedPoints} נקודות קהילה
+            </div>
+          </div>
+
+          <button type="button" className="ev-btn" onClick={() => navigate('/search')}>
+            חזרה לחיפוש עמדות
           </button>
         </div>
       </div>
@@ -176,55 +207,100 @@ export default function RatingAndReportScreen() {
 
   return (
     <div className="container" dir="rtl">
-      <div className="screen-view">
+      <div className="ev-card" style={{ maxWidth: '640px', margin: '0 auto', padding: '28px' }}>
         <div className="screen-header">
-          <span>סיכום טעינה, דירוג ודיווח תקלות</span>
+          <div>
+            <div>סיכום טעינה, דירוג ודיווח תקלות</div>
+            <p className="ev-subtitle">
+              {booking
+                ? `${booking.stationName} · הזמנה #${booking.bookingId}`
+                : 'לא נמצאה טעינה שהסתיימה וממתינה לדירוג'}
+            </p>
+          </div>
         </div>
 
-        <div style={{ maxWidth: '550px', margin: '0 auto' }}>
-          {booking ? (
-            <p style={{ color: 'var(--light-blue)', textAlign: 'center', marginBottom: '15px' }}>
-              מדרגים את הטעינה בתחנה: <strong>{booking.stationName}</strong> (הזמנה #{booking.bookingId})
-            </p>
-          ) : (
-            <div style={{ background: '#1e293b', color: '#cbd5e1', padding: '12px', borderRadius: '8px', marginBottom: '15px', textAlign: 'center' }}>
-              לא נמצאה טעינה שהסתיימה ועדיין לא דורגה. יש לסיים טעינה כדי לדרג.
-            </div>
-          )}
+        {!booking && (
+          <div
+            className="ev-alert-brand"
+            style={{ textAlign: 'center', marginBottom: '20px' }}
+          >
+            לא נמצאה טעינה שהסתיימה ועדיין לא דורגה. יש לסיים טעינה כדי לדרג.
+          </div>
+        )}
 
-          {error && (
-            <div style={{ background: '#ff4d4d', color: 'white', padding: '10px', borderRadius: '6px', marginBottom: '15px', textAlign: 'center' }}>
-              {error}
-            </div>
-          )}
+        {error && <div className="ev-alert-error">{error}</div>}
 
-          <form onSubmit={handleSubmitRating} style={{ background: '#121212', padding: '24px', borderRadius: '16px', border: '1px solid var(--card-border)', marginBottom: '20px', textAlign: 'center' }}>
-            <h3 style={{ marginTop: 0, color: 'var(--text-main)', fontSize: '1.1rem', marginBottom: '15px' }}>
-              ⭐ הטרמינל פנוי? דרג את חוויית הטעינה:
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          {/* טופס דירוג */}
+          <form
+            onSubmit={handleSubmitRating}
+            style={{
+              background: 'var(--ev-bg)',
+              padding: '22px',
+              borderRadius: '12px',
+              border: '1px solid var(--ev-border)',
+            }}
+          >
+            <h3 style={{ margin: '0 0 14px 0', fontSize: '1.02rem', color: 'var(--ev-ink)' }}>
+              איך הייתה חוויית הטעינה?
             </h3>
 
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginBottom: '20px', direction: 'ltr' }}>
-              {[1, 2, 3, 4, 5].map((star) => (
-                <span
-                  key={star}
-                  style={{
-                    fontSize: '2rem',
-                    cursor: 'pointer',
-                    color: (hoverRating || rating) >= star ? 'var(--yellow)' : '#4b5563',
-                    transition: 'transform 0.2s ease, color 0.2s ease',
-                    transform: (hoverRating || rating) >= star ? 'scale(1.15)' : 'scale(1)',
-                  }}
-                  onMouseEnter={() => setHoverRating(star)}
-                  onMouseLeave={() => setHoverRating(0)}
-                  onClick={() => setRating(star)}
-                >
-                  ★
-                </span>
-              ))}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                marginBottom: '18px',
+                direction: 'ltr',
+                justifyContent: 'flex-end',
+              }}
+            >
+              <span
+                className="font-mono-num"
+                style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--ev-ink-muted)', marginRight: '8px' }}
+              >
+                {rating}/5
+              </span>
+              {[1, 2, 3, 4, 5].map((star) => {
+                const filled = (hoverRating || rating) >= star;
+                return (
+                  <button
+                    key={star}
+                    type="button"
+                    onMouseEnter={() => setHoverRating(star)}
+                    onMouseLeave={() => setHoverRating(0)}
+                    onClick={() => setRating(star)}
+                    aria-label={`דירוג ${star}`}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: '4px',
+                      cursor: 'pointer',
+                      color: filled ? '#f59e0b' : '#cbd5e1',
+                      transition: 'transform 0.15s ease, color 0.15s ease',
+                      transform: filled ? 'scale(1.1)' : 'scale(1)',
+                    }}
+                  >
+                    <svg
+                      width="28"
+                      height="28"
+                      viewBox="0 0 24 24"
+                      fill={filled ? 'currentColor' : 'none'}
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                    </svg>
+                  </button>
+                );
+              })}
             </div>
 
-            <div className="form-group" style={{ textAlign: 'right', marginBottom: '15px' }}>
-              <label>חוות דעת קצרה:</label>
+            <div className="form-group">
+              <label>חוות דעת קצרה</label>
               <input
                 type="text"
                 className="form-control"
@@ -234,33 +310,51 @@ export default function RatingAndReportScreen() {
               />
             </div>
 
-            <button type="submit" className="btn" disabled={submitting || !booking} style={{ width: '100%', padding: '12px', cursor: 'pointer' }}>
-              {submitting ? 'שולח לשרת...' : 'שלח דירוג וסיום נסיעה 📥'}
+            <button type="submit" className="ev-btn" disabled={submitting || !booking}>
+              {submitting ? 'שולח לשרת...' : 'שלח דירוג וסיים נסיעה'}
             </button>
           </form>
 
-          <form onSubmit={handleSubmitReport} style={{ background: '#180505', padding: '24px', borderRadius: '16px', border: '1.5px solid var(--danger)', textAlign: 'right' }}>
-            <h4 style={{ marginTop: 0, color: '#f87171', fontSize: '1.05rem', marginBottom: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-              ⚠️ זיהית תקלה בעמדה? דווח לנו (וקבל 20 נקודות בונוס!):
+          {/* טופס דיווח תקלה */}
+          <form
+            onSubmit={handleSubmitReport}
+            style={{
+              background: 'var(--ev-danger-soft)',
+              padding: '22px',
+              borderRadius: '12px',
+              border: '1px solid var(--ev-danger-border)',
+            }}
+          >
+            <h4 style={{ margin: '0 0 6px 0', fontSize: '0.98rem', color: '#991b1b' }}>
+              זיהית תקלה בעמדה?
             </h4>
+            <p style={{ margin: '0 0 14px 0', fontSize: '0.82rem', color: '#b91c1c' }}>
+              דיווח אמין מסיר זמנית את העמדה התקולה ומזכה אותך ב-20 נקודות קהילה.
+            </p>
 
-            <div className="form-group" style={{ marginBottom: '15px' }}>
-              <label style={{ color: '#fca5a5' }}>סוג התקלה:</label>
+            <div className="form-group">
+              <label style={{ color: '#991b1b' }}>סוג התקלה</label>
               <select
                 className="form-control"
                 value={selectedIssue}
                 onChange={(e) => setSelectedIssue(e.target.value)}
-                style={{ background: '#121212', borderColor: '#7f1d1d', color: 'white' }}
               >
                 <option value="שקע טעינה אינו מגיב">שקע טעינה אינו מגיב</option>
                 <option value="כבל קרוע או פגום">כבל קרוע או פגום</option>
-                <option value="העמדה תפוסה פיזית אך מופיעה כפנויה">העמדה תפוסה פיזית אך מופיעה כפנויה</option>
+                <option value="העמדה תפוסה פיזית אך מופיעה כפנויה">
+                  העמדה תפוסה פיזית אך מופיעה כפנויה
+                </option>
                 <option value="תקלת תקשורת / אפליקציה">תקלת תקשורת / אפליקציה</option>
               </select>
             </div>
 
-            <button type="submit" className="btn" disabled={submitting || !booking} style={{ background: 'var(--danger)', width: '100%', padding: '12px', fontWeight: 'bold', cursor: 'pointer' }}>
-              🚨 דווח על תקלה וסיום נסיעה 🎊
+            <button
+              type="submit"
+              className="ev-btn"
+              disabled={submitting || !booking}
+              style={{ background: 'var(--ev-danger)' }}
+            >
+              {submitting ? 'שולח דיווח...' : 'דווח על תקלה וסיים נסיעה'}
             </button>
           </form>
         </div>

@@ -16,6 +16,13 @@ interface ChargeBooking {
 
 const ACTIVE_STATUSES = ['Held', 'Confirmed', 'Charging'];
 
+const BOOKING_STEPS = [
+  { id: 'Held', label: "שמור ל-15 דק'" },
+  { id: 'Confirmed', label: 'הגעה אושרה' },
+  { id: 'Charging', label: 'טעינה פעילה' },
+  { id: 'Completed', label: 'סיום ודירוג' },
+] as const;
+
 export default function ActiveSessionScreen() {
   const [booking, setBooking] = useState<ChargeBooking | null>(null);
   const [secondsLeft, setSecondsLeft] = useState<number>(0);
@@ -31,7 +38,6 @@ export default function ActiveSessionScreen() {
       const myBookings = await apiFetch<ChargeBooking[]>('/ChargeBooking/my');
       const active = myBookings.find((b) => ACTIVE_STATUSES.includes(b.status)) ?? null;
       setBooking(active);
-
       if (active) {
         const expiresAtMs = new Date(active.createdAt).getTime() + 15 * 60 * 1000;
         const remainingSec = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
@@ -63,7 +69,6 @@ export default function ActiveSessionScreen() {
     if (!booking) return;
     setError(null);
     setUpdating(true);
-
     try {
       const updated = await apiFetch<ChargeBooking>(
         `/ChargeBooking/${booking.id}/status?status=${newStatus}`,
@@ -71,7 +76,6 @@ export default function ActiveSessionScreen() {
       );
 
       if (newStatus === 'Completed') {
-        // שומרים את פרטי ההזמנה והתחנה עבור מסך הדירוג ודיווח התקלות
         localStorage.setItem(
           'lastCompletedBooking',
           JSON.stringify({
@@ -100,114 +104,274 @@ export default function ActiveSessionScreen() {
   const minutes = Math.floor(secondsLeft / 60);
   const seconds = secondsLeft % 60;
   const formattedTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  const isExpiringSoon = booking?.status === 'Held' && secondsLeft > 0 && secondsLeft <= 180;
 
   if (loading) {
     return (
       <div className="container" dir="rtl">
-        <div className="screen-view" style={{ textAlign: 'center', padding: '40px', color: 'white' }}>
-          <p>⏳ טוען פרטי שריון פעיל...</p>
+        <div className="ev-card" style={{ textAlign: 'center', padding: '48px 24px' }}>
+          <p style={{ margin: 0, color: 'var(--ev-ink-muted)', fontWeight: 500 }}>
+            טוען פרטי שריון פעיל...
+          </p>
         </div>
       </div>
     );
   }
 
+  const currentStepIndex = booking
+    ? BOOKING_STEPS.findIndex((step) => step.id === booking.status)
+    : -1;
+
   return (
     <div className="container" dir="rtl">
-      <div className="screen-view">
+      <div className="ev-card" style={{ maxWidth: '680px', margin: '0 auto', padding: '28px' }}>
         <div className="screen-header">
-          <span>ניווט ושריון עמדה בזמן אמת</span>
+          <div>
+            <div>ניווט ושריון עמדה בזמן אמת</div>
+            <p className="ev-subtitle">מעקב הגעה, התחלת טעינה וסיום מסודר</p>
+          </div>
+          {booking && (
+            <span
+              className="font-mono-num"
+              style={{
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                color: 'var(--ev-brand)',
+              }}
+            >
+              הזמנה #{booking.id}
+            </span>
+          )}
         </div>
 
-        <div style={{ maxWidth: '550px', margin: '0 auto', textAlign: 'center' }}>
-          {error && (
-            <div style={{ background: '#ff4d4d', color: 'white', padding: '10px', borderRadius: '6px', marginBottom: '15px' }}>
-              {error}
-            </div>
-          )}
+        {error && <div className="ev-alert-error">{error}</div>}
 
-          {!booking ? (
-            <div style={{ background: '#121212', padding: '30px', borderRadius: '16px', border: '1px solid #333', color: 'white' }}>
-              <p style={{ color: '#aaa', marginBottom: '20px' }}>אין לך כרגע שריון או טעינה פעילה.</p>
-              <button type="button" className="btn" onClick={() => navigate('/search')} style={{ cursor: 'pointer' }}>
-                🔍 חפש עמדה לשריון
-              </button>
-            </div>
-          ) : (
-            <div style={{ background: '#121212', padding: '24px', borderRadius: '16px', border: '1px solid var(--card-border)' }}>
-              <h3 style={{ marginTop: 0, color: 'var(--light-blue)', fontSize: '1.2rem' }}>
-                {booking.stationName}
-              </h3>
-              <p style={{ color: '#aaa', fontSize: '0.9rem', marginBottom: '8px' }}>
-                📍 {booking.stationAddress} | 🚗 {booking.vehicleModel}
-              </p>
-              <p style={{ color: 'var(--primary)', fontWeight: 'bold', marginBottom: '18px' }}>
-                סטטוס נוכחי: {booking.status} ({booking.currentBatteryPercent}% → {booking.targetBatteryPercent}%)
-              </p>
+        {!booking ? (
+          <div
+            style={{
+              textAlign: 'center',
+              padding: '36px 20px',
+              background: 'var(--ev-bg)',
+              borderRadius: '12px',
+              border: '1px solid var(--ev-border)',
+            }}
+          >
+            <h3 style={{ margin: '0 0 8px 0', fontSize: '1.05rem', color: 'var(--ev-ink)' }}>
+              אין לך כרגע שריון או טעינה פעילה
+            </h3>
+            <p style={{ margin: '0 0 20px 0', fontSize: '0.88rem', color: 'var(--ev-ink-soft)' }}>
+              בחרי עמדה מומלצת מהחיפוש כדי לשריין שקע מראש ל-15 דקות.
+            </p>
+            <button
+              type="button"
+              className="ev-btn ev-btn-auto"
+              onClick={() => navigate('/search')}
+            >
+              חיפוש עמדת טעינה
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+            {/* פרטי עמדה ויעד סוללה */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                flexWrap: 'wrap',
+                gap: '12px',
+              }}
+            >
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700, color: 'var(--ev-ink)' }}>
+                  {booking.stationName}
+                </h3>
+                <p style={{ margin: '4px 0 0 0', fontSize: '0.86rem', color: 'var(--ev-ink-muted)' }}>
+                  {booking.stationAddress} · {booking.vehicleModel}
+                </p>
+              </div>
 
-              {booking.status === 'Held' && (
-                <div style={{
-                  width: '140px',
-                  height: '140px',
-                  margin: '16px auto',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  borderRadius: '50%',
-                  border: '8px solid var(--light-blue)',
-                  boxShadow: '0 0 15px rgba(125, 211, 252, 0.3)',
-                }}>
-                  <span style={{ fontSize: '1.8rem', fontWeight: 'bold', color: 'var(--light-blue)' }}>
-                    {formattedTime}
-                  </span>
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--ev-ink-soft)' }}>יעד סוללה</div>
+                <div className="font-mono-num" style={{ fontSize: '1rem', fontWeight: 700 }}>
+                  {booking.currentBatteryPercent}% → {booking.targetBatteryPercent}%
                 </div>
-              )}
-
-              {booking.status === 'Held' && (
-              <a
-                href={`https://waze.com/ul?q=${encodeURIComponent(booking.stationAddress)}&navigate=yes`}
-                target="_blank"
-                rel="noreferrer"
-                className="btn"
-                style={{ display: 'block', textDecoration: 'none', background: 'var(--green-dark)', marginTop: '15px', padding: '12px' }}
-              >
-                🗺️ פתח ניווט ב-Waze
-              </a>
-              )}
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '15px' }}>
-                {booking.status === 'Held' && (
-                  <button type="button" className="btn" disabled={updating} onClick={() => changeStatus('Confirmed')} style={{ cursor: 'pointer' }}>
-                    ✅ הגעתי לעמדה (אשר הגעה)
-                  </button>
-                )}
-
-                {booking.status === 'Confirmed' && (
-                  <button type="button" className="btn" disabled={updating} onClick={() => changeStatus('Charging')} style={{ cursor: 'pointer' }}>
-                    ⚡ התחל טעינה
-                  </button>
-                )}
-
-                {booking.status === 'Charging' && (
-                  <button type="button" className="btn" disabled={updating} onClick={() => changeStatus('Completed')} style={{ cursor: 'pointer' }}>
-                    🏁 סיימתי טעינה ➔ עבור לדירוג ודיווח
-                  </button>
-                )}
-
-                {(booking.status === 'Held' || booking.status === 'Confirmed') && (
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={updating}
-                    onClick={() => changeStatus('Cancelled')}
-                    style={{ background: '#7f1d1d', cursor: 'pointer' }}
-                  >
-                    ❌ בטל שריון
-                  </button>
-                )}
               </div>
             </div>
-          )}
-        </div>
+
+            {/* סרגל שלבים */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                gap: '8px',
+              }}
+            >
+              {BOOKING_STEPS.map((step, idx) => {
+                const isActiveOrDone = idx <= currentStepIndex;
+                const isCurrent = idx === currentStepIndex;
+                return (
+                  <div key={step.id} style={{ textAlign: 'center' }}>
+                    <div
+                      style={{
+                        height: '6px',
+                        borderRadius: '999px',
+                        marginBottom: '6px',
+                        background: isActiveOrDone ? 'var(--ev-brand)' : '#e2e8f0',
+                        transition: 'background-color 0.2s ease',
+                      }}
+                    />
+                    <span
+                      style={{
+                        fontSize: '0.76rem',
+                        fontWeight: isCurrent ? 700 : 500,
+                        color: isCurrent
+                          ? 'var(--ev-brand)'
+                          : isActiveOrDone
+                            ? 'var(--ev-ink)'
+                            : 'var(--ev-ink-soft)',
+                      }}
+                    >
+                      {step.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* תצוגת טיימר לשריון פעיל */}
+            {booking.status === 'Held' && (
+              <div
+                style={{
+                  padding: '24px 16px',
+                  borderRadius: '12px',
+                  textAlign: 'center',
+                  background: isExpiringSoon ? 'var(--ev-danger-soft)' : 'var(--ev-brand-soft)',
+                  border: `1px solid ${
+                    isExpiringSoon ? 'var(--ev-danger-border)' : 'var(--ev-brand-border)'
+                  }`,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    color: isExpiringSoon ? 'var(--ev-danger)' : 'var(--ev-brand-hover)',
+                    marginBottom: '6px',
+                  }}
+                >
+                  {isExpiringSoon
+                    ? 'השריון עומד לפוג בעוד פחות מ-3 דקות'
+                    : 'זמן שנותר להגעה ואישור בעמדה'}
+                </div>
+                <div
+                  className="font-mono-num"
+                  style={{
+                    fontSize: '2.75rem',
+                    fontWeight: 700,
+                    lineHeight: 1.1,
+                    color: isExpiringSoon ? 'var(--ev-danger)' : 'var(--ev-ink)',
+                  }}
+                >
+                  {formattedTime}
+                </div>
+              </div>
+            )}
+
+            {/* חיווי כשהרכב בשלב טעינה */}
+            {booking.status === 'Charging' && (
+              <div
+                style={{
+                  padding: '20px',
+                  borderRadius: '12px',
+                  background: 'var(--ev-brand-soft)',
+                  border: '1px solid var(--ev-brand-border)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '12px',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--ev-ink)' }}>
+                    הטעינה מתבצעת כעת
+                  </div>
+                  <div style={{ fontSize: '0.82rem', color: 'var(--ev-ink-muted)', marginTop: '2px' }}>
+                    בסיום הוצאת הכבל לחצי על כפתור הסיום כדי לעדכן את זמינות העמדה.
+                  </div>
+                </div>
+                <span
+                  className="font-mono-num"
+                  style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--ev-brand)' }}
+                >
+                  {booking.currentBatteryPercent}% → {booking.targetBatteryPercent}%
+                </span>
+              </div>
+            )}
+
+            {/* כפתורי פעולה */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+              {booking.status === 'Held' && (
+                <>
+                  <a
+                    href={`https://waze.com/ul?q=${encodeURIComponent(booking.stationAddress)}&navigate=yes`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="ev-btn ev-btn-secondary"
+                    style={{ flex: '1 1 180px', textDecoration: 'none' }}
+                  >
+                    פתח ניווט ב-Waze
+                  </a>
+                  <button
+                    type="button"
+                    className="ev-btn"
+                    style={{ flex: '1 1 180px' }}
+                    disabled={updating}
+                    onClick={() => changeStatus('Confirmed')}
+                  >
+                    {updating ? 'מעדכן...' : 'הגעתי לעמדה (אשר הגעה)'}
+                  </button>
+                </>
+              )}
+
+              {booking.status === 'Confirmed' && (
+                <button
+                  type="button"
+                  className="ev-btn ev-btn-accent"
+                  style={{ flex: '1 1 220px' }}
+                  disabled={updating}
+                  onClick={() => changeStatus('Charging')}
+                >
+                  {updating ? 'מתחיל טעינה...' : 'התחל טעינה'}
+                </button>
+              )}
+
+              {booking.status === 'Charging' && (
+                <button
+                  type="button"
+                  className="ev-btn"
+                  style={{ flex: '1 1 220px' }}
+                  disabled={updating}
+                  onClick={() => changeStatus('Completed')}
+                >
+                  {updating ? 'מסיים...' : 'סיימתי טעינה — עבור לדירוג'}
+                </button>
+              )}
+
+              {(booking.status === 'Held' || booking.status === 'Confirmed') && (
+                <button
+                  type="button"
+                  className="ev-btn ev-btn-danger ev-btn-auto"
+                  disabled={updating}
+                  onClick={() => changeStatus('Cancelled')}
+                >
+                  בטל שריון
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

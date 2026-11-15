@@ -38,6 +38,34 @@ function Layout() {
 
   return (
     <div className="ev-app-shell" dir="rtl">
+      <svg
+        className="ev-bg-contours"
+        viewBox="0 0 1440 900"
+        fill="none"
+        preserveAspectRatio="xMidYMid slice"
+        aria-hidden="true"
+      >
+        <path
+          d="M-80 180 C 260 90, 440 340, 820 220 C 1120 125, 1290 280, 1520 190"
+          stroke="#EA580C"
+          strokeWidth="2.5"
+        />
+        <path
+          d="M-60 440 C 310 520, 580 310, 960 430 C 1220 510, 1340 390, 1520 460"
+          stroke="#EA580C"
+          strokeWidth="1.5"
+          strokeDasharray="8 8"
+        />
+        <path
+          d="M-40 720 C 280 610, 640 820, 1020 670 C 1260 575, 1380 690, 1520 640"
+          stroke="#EA580C"
+          strokeWidth="2"
+        />
+        <circle cx="820" cy="220" r="7" fill="#EA580C" />
+        <circle cx="960" cy="430" r="6" fill="#EA580C" />
+        <circle cx="310" cy="485" r="5" fill="#EA580C" />
+      </svg>
+
       <header className="ev-header">
         <div className="ev-header-inner">
           <button

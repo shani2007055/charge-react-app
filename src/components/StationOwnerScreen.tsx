@@ -81,7 +81,7 @@ export default function StationOwnerScreen() {
       const ownerIdClaim = claims.find((c) => c.type === 'ownerId')?.value;
 
       if (!ownerIdClaim) {
-        setError('המשתמש הנוכחי אינו רשום כבעל תחנה. היכנסי ממסך הכניסה בתפקיד "משתמש תחנה (Owner)".');
+        setError('המשתמש הנוכחי אינו רשום כבעל תחנה. היכנסי ממסך הכניסה בתפקיד "בעל עמדת טעינה".');
         return;
       }
 
@@ -117,7 +117,9 @@ export default function StationOwnerScreen() {
       }
       const geoData = (await geoRes.json()) as NominatimResult[];
       if (geoData.length === 0) {
-        throw new Error(`לא הצלחנו לאתר את הכתובת "${address}". נסי לרשום רחוב, מספר ועיר (למשל: רוטשילד 50 תל אביב).`);
+        throw new Error(
+          `לא הצלחנו לאתר את הכתובת "${address}". נסי לרשום רחוב, מספר ועיר (למשל: רוטשילד 50 תל אביב).`
+        );
       }
 
       await apiFetch('/ChargingStations', {
@@ -202,133 +204,242 @@ export default function StationOwnerScreen() {
   if (loading) {
     return (
       <div className="container" dir="rtl">
-        <div className="screen-view" style={{ textAlign: 'center', padding: '40px', color: 'white' }}>
-          <p>⏳ טוען את פאנל בעל התחנה...</p>
+        <div className="ev-card" style={{ textAlign: 'center', padding: '48px 24px' }}>
+          <p style={{ margin: 0, color: 'var(--ev-ink-muted)', fontWeight: 500 }}>
+            טוען את לוח הניהול של בעל התחנה...
+          </p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="container" dir="rtl">
-      <div className="screen-view">
-        <div className="screen-header">
-          <span>פנאל ניהול בעל תחנה</span>
-        </div>
+    <div className="container" dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      {error && <div className="ev-alert-error" style={{ marginBottom: 0 }}>{error}</div>}
 
-        {error && (
-          <div style={{ background: '#ff4d4d', color: 'white', padding: '12px', borderRadius: '8px', marginBottom: '20px', textAlign: 'center' }}>
-            {error}
+      {dashboard && (
+        <>
+          {/* שורת מדדים עליונה */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+              gap: '14px',
+            }}
+          >
+            <div className="ev-card" style={{ padding: '18px 20px' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--ev-ink-soft)' }}>סה&quot;כ עמדות</div>
+              <div className="font-mono-num" style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px' }}>
+                {dashboard.totalStationsCount}
+              </div>
+            </div>
+            <div className="ev-card" style={{ padding: '18px 20px' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--ev-ink-soft)' }}>עמדות פעילות</div>
+              <div
+                className="font-mono-num"
+                style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--ev-brand)', marginTop: '4px' }}
+              >
+                {dashboard.activeStationsCount}
+              </div>
+            </div>
+            <div className="ev-card" style={{ padding: '18px 20px' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--ev-ink-soft)' }}>עמדות תקולות</div>
+              <div
+                className="font-mono-num"
+                style={{
+                  fontSize: '1.5rem',
+                  fontWeight: 700,
+                  color: dashboard.faultyStationsCount > 0 ? 'var(--ev-danger)' : 'var(--ev-ink)',
+                  marginTop: '4px',
+                }}
+              >
+                {dashboard.faultyStationsCount}
+              </div>
+            </div>
+            <div className="ev-card" style={{ padding: '18px 20px' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--ev-ink-soft)' }}>סה&quot;כ הזמנות</div>
+              <div className="font-mono-num" style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px' }}>
+                {dashboard.totalBookings}
+              </div>
+            </div>
+            <div className="ev-card" style={{ padding: '18px 20px' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--ev-ink-soft)' }}>דירוג ממוצע</div>
+              <div className="font-mono-num" style={{ fontSize: '1.5rem', fontWeight: 700, marginTop: '4px' }}>
+                {dashboard.averageRating !== null ? dashboard.averageRating.toFixed(1) : '—'}
+              </div>
+            </div>
           </div>
-        )}
 
-        {dashboard && (
-          <>
-            <div style={{ display: 'flex', gap: '12px', marginBottom: '20px', flexWrap: 'wrap', color: 'white' }}>
-              <div style={{ background: '#121212', padding: '12px 18px', borderRadius: '8px', border: '1px solid #333' }}>
-                ⚡ סה"כ עמדות: <strong>{dashboard.totalStationsCount}</strong>
-              </div>
-              <div style={{ background: '#121212', padding: '12px 18px', borderRadius: '8px', border: '1px solid #333' }}>
-                ✅ פעילות: <strong style={{ color: 'var(--primary)' }}>{dashboard.activeStationsCount}</strong>
-              </div>
-              <div style={{ background: '#121212', padding: '12px 18px', borderRadius: '8px', border: '1px solid #333' }}>
-                ⚠️ תקולות: <strong style={{ color: '#f87171' }}>{dashboard.faultyStationsCount}</strong>
-              </div>
-              <div style={{ background: '#121212', padding: '12px 18px', borderRadius: '8px', border: '1px solid #333' }}>
-                📅 סה"כ הזמנות: <strong>{dashboard.totalBookings}</strong>
-              </div>
-              <div style={{ background: '#121212', padding: '12px 18px', borderRadius: '8px', border: '1px solid #333' }}>
-                ⭐ דירוג ממוצע: <strong>{dashboard.averageRating !== null ? dashboard.averageRating.toFixed(1) : 'אין עדיין'}</strong>
+          {/* הוספת עמדה חדשה */}
+          <form onSubmit={handleAddStation} className="ev-card">
+            <div className="screen-header">
+              <div>
+                <div>הוספת עמדת טעינה חדשה</div>
+                <p className="ev-subtitle">הכתובת מאותרת אוטומטית ומוצגת לנהגים במפה</p>
               </div>
             </div>
 
-            <form onSubmit={handleAddStation} style={{ background: '#121212', padding: '20px', borderRadius: '10px', border: '1px solid #333', marginBottom: '25px' }}>
-              <h3 style={{ marginTop: 0, color: 'white', marginBottom: '15px' }}>➕ הוספת עמדת טעינה חדשה</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
-                <div className="form-group">
-                  <label>שם העמדה:</label>
-                  <input type="text" className="form-control" required placeholder="עמדת תל אביב מרכז" value={name} onChange={(e) => setName(e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label>כתובת מלאה (מאותרת אוטומטית במפה):</label>
-                  <input type="text" className="form-control" required placeholder="רוטשילד 50, תל אביב" value={address} onChange={(e) => setAddress(e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label>סוג שקע:</label>
-                  <select className="form-control" value={chargerType} onChange={(e) => setChargerType(e.target.value as 'CCS' | 'Type2')}>
-                    <option value="CCS">CCS (טעינה מהירה)</option>
-                    <option value="Type2">Type2</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>הספק (kW):</label>
-                  <input type="number" className="form-control" required min={1} max={1000} value={maxKw} onChange={(e) => setMaxKw(e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label>מחיר לקוט"ש (₪):</label>
-                  <input type="number" step="0.1" className="form-control" required min={0.1} value={pricePerKwh} onChange={(e) => setPricePerKwh(e.target.value)} />
-                </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))',
+                gap: '12px',
+              }}
+            >
+              <div className="form-group">
+                <label>שם העמדה</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  required
+                  placeholder="עמדת תל אביב מרכז"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
               </div>
-              <button type="submit" className="btn" disabled={saving} style={{ marginTop: '10px', cursor: 'pointer' }}>
-                {saving ? 'מאתר כתובת ושומר...' : 'שמור עמדה חדשה ➔'}
-              </button>
-            </form>
+              <div className="form-group">
+                <label>כתובת מלאה</label>
+                <input
+                  type="text"
+                  className="form-control"
+                  required
+                  placeholder="רוטשילד 50, תל אביב"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label>סוג שקע</label>
+                <select
+                  className="form-control"
+                  value={chargerType}
+                  onChange={(e) => setChargerType(e.target.value as 'CCS' | 'Type2')}
+                >
+                  <option value="CCS">CCS (טעינה מהירה)</option>
+                  <option value="Type2">Type2</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>הספק (kW)</label>
+                <input
+                  type="number"
+                  className="form-control tabular-nums"
+                  required
+                  min={1}
+                  max={1000}
+                  value={maxKw}
+                  onChange={(e) => setMaxKw(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label>מחיר לקוט&quot;ש (₪)</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  className="form-control tabular-nums"
+                  required
+                  min={0.1}
+                  value={pricePerKwh}
+                  onChange={(e) => setPricePerKwh(e.target.value)}
+                />
+              </div>
+            </div>
 
-            <h3 style={{ color: 'white', marginBottom: '10px' }}>🔌 העמדות שלי</h3>
+            <button type="submit" className="ev-btn ev-btn-auto" disabled={saving}>
+              {saving ? 'מאתר כתובת ושומר...' : 'שמור עמדה חדשה'}
+            </button>
+          </form>
+
+          {/* ניהול העמדות שלי */}
+          <div className="ev-card">
+            <div className="screen-header">
+              <div>
+                <div>העמדות שלי</div>
+                <p className="ev-subtitle">עדכון תעריף, הספק, הפעלה/השבתה וטיפול בתקלות</p>
+              </div>
+            </div>
+
             {dashboard.stations.length === 0 ? (
-              <p style={{ color: '#aaa', marginBottom: '25px' }}>עדיין לא הוספת עמדות.</p>
+              <p style={{ color: 'var(--ev-ink-soft)', margin: 0 }}>עדיין לא הוספת עמדות.</p>
             ) : (
-              <div style={{ display: 'grid', gap: '10px', marginBottom: '25px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {dashboard.stations.map((station) => (
-                  <div key={station.id} style={{ background: '#121212', padding: '15px', borderRadius: '8px', border: '1px solid #333' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-                      <div style={{ color: 'white' }}>
-                        <strong>{station.name}</strong> — <span style={{ color: '#aaa' }}>{station.address}</span>
-                        <div style={{ fontSize: '0.85rem', color: '#ccc', marginTop: '4px' }}>
-                          {station.chargerType} | {station.maxKw} kW | ₪{station.pricePerKwh}/kWh
+                  <div
+                    key={station.id}
+                    style={{
+                      background: 'var(--ev-bg)',
+                      padding: '16px 18px',
+                      borderRadius: '11px',
+                      border: '1px solid var(--ev-border)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '12px',
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--ev-ink)' }}>
+                          {station.name}
+                        </div>
+                        <div
+                          className="tabular-nums"
+                          style={{ fontSize: '0.83rem', color: 'var(--ev-ink-muted)', marginTop: '4px' }}
+                        >
+                          {station.address} · {station.chargerType} · {station.maxKw} kW · ₪
+                          {station.pricePerKwh}/kWh ·{' '}
+                          <span
+                            style={{
+                              fontWeight: 600,
+                              color:
+                                station.currentStatus === 'Faulty'
+                                  ? 'var(--ev-danger)'
+                                  : station.isActive
+                                    ? 'var(--ev-brand)'
+                                    : 'var(--ev-ink-soft)',
+                            }}
+                          >
+                            {station.currentStatus === 'Faulty'
+                              ? 'דווחה תקלה'
+                              : station.isActive
+                                ? 'פעילה ותקינה'
+                                : 'מושבתת'}
+                          </span>
                         </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                        <span style={{
-                          background: station.isActive ? '#064e3b' : '#7f1d1d',
-                          color: station.isActive ? 'var(--primary)' : '#fca5a5',
-                          padding: '4px 12px',
-                          borderRadius: '20px',
-                          fontSize: '0.85rem',
-                          fontWeight: 'bold',
-                        }}>
-                          {station.isActive ? 'פעילה ותקינה' : 'לא פעילה'}
-                        </span>
 
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                         {station.currentStatus === 'Faulty' && (
-                          <>
-                            <span style={{ background: '#7f1d1d', color: '#fca5a5', padding: '4px 10px', borderRadius: '20px', fontSize: '0.85rem', fontWeight: 'bold' }}>
-                              ⚠️ סומנה כתקולה!
-                            </span>
-                            <button
-                              type="button"
-                              className="btn"
-                              style={{ width: 'auto', padding: '6px 12px', fontSize: '0.85rem', background: '#0369a1', cursor: 'pointer' }}
-                              onClick={() => handleResolveFault(station.id)}
-                            >
-                              🔧 סמן כטופלה (זמינה)
-                            </button>
-                          </>
+                          <button
+                            type="button"
+                            className="ev-btn ev-btn-accent ev-btn-auto"
+                            onClick={() => handleResolveFault(station.id)}
+                          >
+                            סמן כטופלה (זמינה)
+                          </button>
                         )}
 
                         <button
                           type="button"
-                          className="btn"
-                          style={{ width: 'auto', padding: '6px 12px', fontSize: '0.85rem', background: '#334155', cursor: 'pointer' }}
-                          onClick={() => (editingStationId === station.id ? setEditingStationId(null) : startEditing(station))}
+                          className="ev-btn ev-btn-secondary ev-btn-auto"
+                          onClick={() =>
+                            editingStationId === station.id
+                              ? setEditingStationId(null)
+                              : startEditing(station)
+                          }
                         >
-                          {editingStationId === station.id ? 'ביטול עריכה' : '✏️ ערוך פרטים'}
+                          {editingStationId === station.id ? 'ביטול עריכה' : 'ערוך פרטים'}
                         </button>
 
                         <button
                           type="button"
-                          className="btn"
-                          style={{ width: 'auto', padding: '6px 14px', fontSize: '0.85rem', background: station.isActive ? '#7f1d1d' : '#064e3b', cursor: 'pointer' }}
+                          className={`ev-btn ev-btn-auto ${
+                            station.isActive ? 'ev-btn-danger' : ''
+                          }`}
                           onClick={() => handleToggleStationStatus(station)}
                         >
                           {station.isActive ? 'השבת עמדה' : 'הפעל עמדה'}
@@ -337,28 +448,63 @@ export default function StationOwnerScreen() {
                     </div>
 
                     {editingStationId === station.id && (
-                      <div style={{ width: '100%', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #333', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px', alignItems: 'end' }}>
+                      <div
+                        style={{
+                          width: '100%',
+                          marginTop: '14px',
+                          paddingTop: '14px',
+                          borderTop: '1px solid var(--ev-border)',
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))',
+                          gap: '10px',
+                          alignItems: 'end',
+                        }}
+                      >
                         <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label>שם:</label>
-                          <input type="text" className="form-control" value={editName} onChange={(e) => setEditName(e.target.value)} />
+                          <label>שם</label>
+                          <input
+                            type="text"
+                            className="form-control"
+                            value={editName}
+                            onChange={(e) => setEditName(e.target.value)}
+                          />
                         </div>
                         <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label>מחיר (₪/kWh):</label>
-                          <input type="number" step="0.1" className="form-control" value={editPrice} onChange={(e) => setEditPrice(e.target.value)} />
+                          <label>מחיר (₪/kWh)</label>
+                          <input
+                            type="number"
+                            step="0.1"
+                            className="form-control tabular-nums"
+                            value={editPrice}
+                            onChange={(e) => setEditPrice(e.target.value)}
+                          />
                         </div>
                         <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label>הספק (kW):</label>
-                          <input type="number" className="form-control" value={editMaxKw} onChange={(e) => setEditMaxKw(e.target.value)} />
+                          <label>הספק (kW)</label>
+                          <input
+                            type="number"
+                            className="form-control tabular-nums"
+                            value={editMaxKw}
+                            onChange={(e) => setEditMaxKw(e.target.value)}
+                          />
                         </div>
                         <div className="form-group" style={{ marginBottom: 0 }}>
-                          <label>סוג שקע:</label>
-                          <select className="form-control" value={editChargerType} onChange={(e) => setEditChargerType(e.target.value as 'CCS' | 'Type2')}>
+                          <label>סוג שקע</label>
+                          <select
+                            className="form-control"
+                            value={editChargerType}
+                            onChange={(e) => setEditChargerType(e.target.value as 'CCS' | 'Type2')}
+                          >
                             <option value="CCS">CCS</option>
                             <option value="Type2">Type2</option>
                           </select>
                         </div>
-                        <button type="button" className="btn" style={{ cursor: 'pointer' }} onClick={() => handleSaveEdit(station)}>
-                          💾 שמור שינויים
+                        <button
+                          type="button"
+                          className="ev-btn"
+                          onClick={() => handleSaveEdit(station)}
+                        >
+                          שמור שינויים
                         </button>
                       </div>
                     )}
@@ -366,69 +512,152 @@ export default function StationOwnerScreen() {
                 ))}
               </div>
             )}
+          </div>
 
-            {dashboard.recentFaultReports.length > 0 && (
-              <div style={{ marginBottom: '25px' }}>
-                <h3 style={{ color: '#f87171', marginBottom: '10px' }}>🚨 דיווחי תקלות אחרונים</h3>
-                <div style={{ display: 'grid', gap: '8px' }}>
-                  {dashboard.recentFaultReports.map((fault) => (
-                    <div key={fault.id} style={{ background: '#2b0909', border: '1px solid var(--danger)', padding: '12px', borderRadius: '8px', color: 'white' }}>
-                      <strong>{fault.stationName}</strong> — סטטוס: {fault.status}
-                      {fault.currentDriverName && ` (דווח ע"י ${fault.currentDriverName})`}
-                    </div>
-                  ))}
+          {/* דיווחי תקלות + ביקורות אחרונות */}
+          {(dashboard.recentFaultReports.length > 0 || dashboard.recentReviews.length > 0) && (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))',
+                gap: '20px',
+              }}
+            >
+              {dashboard.recentFaultReports.length > 0 && (
+                <div className="ev-card">
+                  <h3 style={{ margin: '0 0 14px 0', fontSize: '1rem', color: 'var(--ev-danger)' }}>
+                    דיווחי תקלות אחרונים
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {dashboard.recentFaultReports.map((fault) => (
+                      <div
+                        key={fault.id}
+                        style={{
+                          background: 'var(--ev-danger-soft)',
+                          border: '1px solid var(--ev-danger-border)',
+                          padding: '12px 14px',
+                          borderRadius: '10px',
+                          fontSize: '0.86rem',
+                          color: '#991b1b',
+                        }}
+                      >
+                        <strong>{fault.stationName}</strong> · סטטוס: {fault.status}
+                        {fault.currentDriverName && ` (דווח ע"י ${fault.currentDriverName})`}
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {dashboard.recentReviews.length > 0 && (
-              <div style={{ marginBottom: '25px' }}>
-                <h3 style={{ color: 'white', marginBottom: '10px' }}>💬 ביקורות אחרונות מנהגים</h3>
-                <div style={{ display: 'grid', gap: '8px' }}>
-                  {dashboard.recentReviews.map((rev) => (
-                    <div key={rev.id} style={{ background: '#121212', border: '1px solid #333', padding: '12px', borderRadius: '8px', color: 'white' }}>
-                      <strong>{rev.stationName}</strong> | ⭐ {rev.rating}/5 — <span style={{ color: '#aaa' }}>{rev.driverName}</span>
-                      <p style={{ margin: '4px 0 0 0', color: '#cbd5e1', fontSize: '0.9rem' }}>{rev.comment}</p>
-                    </div>
-                  ))}
+              {dashboard.recentReviews.length > 0 && (
+                <div className="ev-card">
+                  <h3 style={{ margin: '0 0 14px 0', fontSize: '1rem', color: 'var(--ev-ink)' }}>
+                    ביקורות אחרונות מנהגים
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {dashboard.recentReviews.map((rev) => (
+                      <div
+                        key={rev.id}
+                        style={{
+                          paddingBottom: '12px',
+                          borderBottom: '1px solid var(--ev-surface-subtle)',
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            fontSize: '0.86rem',
+                          }}
+                        >
+                          <strong style={{ color: 'var(--ev-ink)' }}>{rev.stationName}</strong>
+                          <span className="font-mono-num" style={{ color: 'var(--ev-brand)', fontWeight: 700 }}>
+                            {rev.rating}/5
+                          </span>
+                        </div>
+                        <p style={{ margin: '4px 0 0 0', fontSize: '0.84rem', color: 'var(--ev-ink-muted)' }}>
+                          {rev.comment}
+                        </p>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--ev-ink-soft)', marginTop: '4px' }}>
+                          {rev.driverName}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+          )}
 
-            <h3 style={{ color: 'white', marginBottom: '10px' }}>📋 היסטוריית הזמנות בעמדות שלי</h3>
+          {/* טבלת היסטוריית הזמנות */}
+          <div className="ev-card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '18px 22px', borderBottom: '1px solid var(--ev-border)' }}>
+              <h3 style={{ margin: 0, fontSize: '1.05rem', color: 'var(--ev-ink)' }}>
+                היסטוריית הזמנות בעמדות שלי
+              </h3>
+            </div>
+
             {bookings.length === 0 ? (
-              <p style={{ color: '#aaa' }}>אין עדיין הזמנות בעמדות שלך.</p>
+              <p style={{ color: 'var(--ev-ink-soft)', padding: '22px', margin: 0 }}>
+                אין עדיין הזמנות בעמדות שלך.
+              </p>
             ) : (
               <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'right', fontSize: '0.9rem' }}>
+                <table
+                  style={{
+                    width: '100%',
+                    borderCollapse: 'collapse',
+                    textAlign: 'right',
+                    fontSize: '0.86rem',
+                  }}
+                >
                   <thead>
-                    <tr style={{ background: '#121212', color: '#aaa', borderBottom: '1px solid #333' }}>
-                      <th style={{ padding: '10px' }}>מזהה</th>
-                      <th style={{ padding: '10px' }}>תחנה</th>
-                      <th style={{ padding: '10px' }}>רכב</th>
-                      <th style={{ padding: '10px' }}>סוללה</th>
-                      <th style={{ padding: '10px' }}>סטטוס</th>
-                      <th style={{ padding: '10px' }}>תאריך</th>
+                    <tr
+                      style={{
+                        background: 'var(--ev-bg)',
+                        color: 'var(--ev-ink-soft)',
+                        borderBottom: '1px solid var(--ev-border)',
+                      }}
+                    >
+                      <th style={{ padding: '12px 16px', fontWeight: 600 }}>מזהה</th>
+                      <th style={{ padding: '12px 16px', fontWeight: 600 }}>תחנה</th>
+                      <th style={{ padding: '12px 16px', fontWeight: 600 }}>רכב</th>
+                      <th style={{ padding: '12px 16px', fontWeight: 600 }}>סוללה</th>
+                      <th style={{ padding: '12px 16px', fontWeight: 600 }}>סטטוס</th>
+                      <th style={{ padding: '12px 16px', fontWeight: 600 }}>תאריך</th>
                     </tr>
                   </thead>
                   <tbody>
                     {bookings.map((b) => (
-                      <tr key={b.id} style={{ borderBottom: '1px solid #262626' }}>
-                        <td style={{ padding: '12px 10px', color: '#aaa' }}>#{b.id}</td>
-                        <td style={{ padding: '12px 10px', color: 'white', fontWeight: 'bold' }}>{b.stationName}</td>
-                        <td style={{ padding: '12px 10px', color: 'white' }}>{b.vehicleModel}</td>
-                        <td style={{ padding: '12px 10px', color: '#ccc' }}>{b.currentBatteryPercent}% → {b.targetBatteryPercent}%</td>
-                        <td style={{ padding: '12px 10px', color: 'var(--primary)', fontWeight: 'bold' }}>{b.status}</td>
-                        <td style={{ padding: '12px 10px', color: '#aaa' }}>{new Date(b.createdAt).toLocaleDateString('he-IL')}</td>
+                      <tr key={b.id} style={{ borderBottom: '1px solid var(--ev-surface-subtle)' }}>
+                        <td className="font-mono-num" style={{ padding: '12px 16px', color: 'var(--ev-ink-soft)' }}>
+                          #{b.id}
+                        </td>
+                        <td style={{ padding: '12px 16px', color: 'var(--ev-ink)', fontWeight: 600 }}>
+                          {b.stationName}
+                        </td>
+                        <td style={{ padding: '12px 16px', color: 'var(--ev-ink-muted)' }}>
+                          {b.vehicleModel}
+                        </td>
+                        <td className="font-mono-num" style={{ padding: '12px 16px', color: 'var(--ev-ink-muted)' }}>
+                          {b.currentBatteryPercent}% → {b.targetBatteryPercent}%
+                        </td>
+                        <td style={{ padding: '12px 16px', color: 'var(--ev-brand)', fontWeight: 600 }}>
+                          {b.status}
+                        </td>
+                        <td className="font-mono-num" style={{ padding: '12px 16px', color: 'var(--ev-ink-soft)' }}>
+                          {new Date(b.createdAt).toLocaleDateString('he-IL')}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             )}
-          </>
-        )}
-      </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

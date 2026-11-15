@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch, isTokenExpired, triggerSessionExpired } from '../api/apiClient';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import type { Station } from '../store/stations/stationsState';
+import { setDriverLocation } from '../store/stations/stationsSlice';
+import type { DriverCoords, Station } from '../store/stations/stationsState';
 import { fetchStations } from '../store/stations/stationsThunks';
 
 interface ChatMessage {
@@ -18,6 +19,24 @@ interface RecommendedAction {
 interface VehicleDto {
   id: number;
   model: string;
+}
+
+interface NominatimReverseResponse {
+  display_name?: string;
+  address?: {
+    road?: string;
+    house_number?: string;
+    city?: string;
+    town?: string;
+    village?: string;
+    municipality?: string;
+  };
+}
+
+interface NominatimSearchResult {
+  lat: string;
+  lon: string;
+  display_name?: string;
 }
 
 interface SpeechRecognitionResultItem {
@@ -92,13 +111,15 @@ export default function VoiceAgentWidget() {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const { role, carModel } = useAppSelector((state) => state.user);
-  const { currentBatteryPercent, targetBatteryPercent } = useAppSelector((state) => state.stations);
+  const { currentBatteryPercent, targetBatteryPercent, driverLocation } = useAppSelector(
+    (state) => state.stations
+  );
 
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'ai',
-      text: 'היי! אני העוזר החכם שלך לטעינה ⚡ לחצי על המיקרופון, דברי חופשי, וכשאת מוכנה לחצי שלח — ותקבלי כפתור ישיר לשריון העמדה!',
+      text: 'היי! אני העוזר החכם שלך לטעינה. לחצי על המיקרופון, דברי חופשי, וכשאת מוכנה לחצי שלח — ותקבלי כפתור ישיר לשריון העמדה.',
     },
   ]);
   const [inputText, setInputText] = useState<string>('');
@@ -108,9 +129,19 @@ export default function VoiceAgentWidget() {
   const [hasActiveBookingError, setHasActiveBookingError] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // שיתוף ובקרת מיקום GPS לסוכן
+  const [shareLocation, setShareLocation] = useState<boolean>(true);
+  const [locatingGps, setLocatingGps] = useState<boolean>(false);
+  const [locationDenied, setLocationDenied] = useState<boolean>(false);
+  const [detectedAddress, setDetectedAddress] = useState<string | null>(null);
+  const [showManualLocation, setShowManualLocation] = useState<boolean>(false);
+  const [manualAddressInput, setManualAddressInput] = useState<string>('');
+  const [resolvingManual, setResolvingManual] = useState<boolean>(false);
+
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
   const ignoreVoiceRef = useRef<boolean>(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const lastUserQueryRef = useRef<string | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -122,6 +153,100 @@ export default function VoiceAgentWidget() {
       recognitionRef.current?.stop();
     };
   }, []);
+
+  // תרגום הקואורדינטות לכתובת קריאה כדי שאפשר יהיה לוודא בעין שהמיקום נכון
+  useEffect(() => {
+    if (!driverLocation) {
+      setDetectedAddress(null);
+      return;
+    }
+
+    let cancelled = false;
+    const fetchReverseAddress = async () => {
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${driverLocation.lat}&lon=${driverLocation.lng}&accept-language=he`
+        );
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as NominatimReverseResponse;
+        const cityName =
+          data.address?.city ||
+          data.address?.town ||
+          data.address?.village ||
+          data.address?.municipality ||
+          '';
+        const road = data.address?.road
+          ? `${data.address.road}${data.address.house_number ? ` ${data.address.house_number}` : ''}`
+          : '';
+        const shortAddress = [road, cityName].filter(Boolean).join(', ');
+        if (!cancelled) {
+          setDetectedAddress(shortAddress || data.display_name || null);
+        }
+      } catch {
+        // במקרה של תקלה בתרגום כתובת נציג קואורדינטות
+      }
+    };
+
+    void fetchReverseAddress();
+    return () => {
+      cancelled = true;
+    };
+  }, [driverLocation]);
+
+  const requestGpsCoords = (): Promise<DriverCoords | null> => {
+    if (!navigator.geolocation) {
+      setLocationDenied(true);
+      return Promise.resolve(null);
+    }
+
+    setLocatingGps(true);
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const coords: DriverCoords = {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          };
+          dispatch(setDriverLocation(coords));
+          setLocationDenied(false);
+          setLocatingGps(false);
+          resolve(coords);
+        },
+        () => {
+          setLocationDenied(true);
+          setLocatingGps(false);
+          resolve(null);
+        },
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
+      );
+    });
+  };
+
+  // איתור מיקום ברקע ברגע שפותחים את הצ'אט אם עוד אין מיקום שמור
+  useEffect(() => {
+    if (isOpen && shareLocation && !driverLocation && !locationDenied && !locatingGps) {
+      void requestGpsCoords();
+    }
+  }, [isOpen, shareLocation, driverLocation, locationDenied]);
+
+  const resolveCurrentCoords = async (): Promise<DriverCoords | null> => {
+    if (!shareLocation) return null;
+    if (driverLocation) return driverLocation;
+    return requestGpsCoords();
+  };
+
+  const handleToggleLocationShare = () => {
+    if (shareLocation) {
+      setShareLocation(false);
+      setShowManualLocation(false);
+      return;
+    }
+    setShareLocation(true);
+    setLocationDenied(false);
+    if (!driverLocation) {
+      void requestGpsCoords();
+    }
+  };
 
   const stopVoiceIfActive = () => {
     ignoreVoiceRef.current = true;
@@ -193,7 +318,10 @@ export default function VoiceAgentWidget() {
     navigate('/results');
   };
 
-  const sendMessageToAgent = async (rawText: string) => {
+  const sendMessageToAgent = async (
+    rawText: string,
+    overrideLocation?: { coords: DriverCoords; address?: string }
+  ) => {
     const trimmed = rawText.trim();
     if (!trimmed || isStreaming) return;
 
@@ -203,17 +331,16 @@ export default function VoiceAgentWidget() {
       return;
     }
 
+    if (!overrideLocation) {
+      lastUserQueryRef.current = trimmed;
+    }
+
     stopVoiceIfActive();
     setErrorMessage(null);
     setHasActiveBookingError(false);
     setInputText('');
 
     const userMsg: ChatMessage = { role: 'user', text: trimmed };
-    const historyForServer: ChatMessage[] = [...messages.slice(1), userMsg].map((m) => ({
-      role: m.role,
-      text: m.text.slice(0, 2000),
-    }));
-
     setMessages((prev) => [...prev, userMsg, { role: 'ai', text: '' }]);
     setIsStreaming(true);
 
@@ -221,6 +348,22 @@ export default function VoiceAgentWidget() {
     const timeoutId = window.setTimeout(() => abortController.abort(), 90000);
 
     try {
+      const coords = overrideLocation ? overrideLocation.coords : await resolveCurrentCoords();
+      const addressLabel = overrideLocation ? overrideLocation.address : detectedAddress;
+      const isRecheck = Boolean(overrideLocation);
+
+      const promptWithLocationContext = coords
+        ? `${trimmed}\n[נתוני מערכת: מיקום הנהג ${isRecheck ? 'עודכן כעת ל-' : 'הנוכחי הוא '}latitude=${coords.lat.toFixed(6)}, longitude=${coords.lng.toFixed(6)}${addressLabel ? ` (${addressLabel})` : ''}. ${isRecheck ? 'הנהג עדכן את מיקומו — התעלם מהמרחקים הקודמים והפעל מיד את FindBestStationsAsync עם הקואורדינטות החדשות האלו!' : 'אם לא צוינה כתובת אחרת בהודעה, השתמש מיד בקואורדינטות אלו ב-FindBestStationsAsync'} (אם הנהג מבקש "הכי קרוב" או ממהר, תן משקל weightDistance=0.85) וב-CalculateDistanceKm.]`
+        : trimmed;
+
+      const historyForServer: ChatMessage[] = [
+        ...messages.slice(1),
+        { role: 'user' as const, text: promptWithLocationContext },
+      ].map((m) => ({
+        role: m.role,
+        text: m.text.slice(0, 2000),
+      }));
+
       const response = await fetch(`${API_BASE_URL}/chat/stream`, {
         method: 'POST',
         headers: {
@@ -327,6 +470,62 @@ export default function VoiceAgentWidget() {
     }
   };
 
+  const handleSaveManualAddress = async (e: FormEvent) => {
+    e.preventDefault();
+    const trimmed = manualAddressInput.trim();
+    if (!trimmed || resolvingManual) return;
+
+    setResolvingManual(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&countrycodes=il&limit=1&q=${encodeURIComponent(trimmed)}`
+      );
+      if (!res.ok) {
+        throw new Error('שגיאה באיתור הכתובת');
+      }
+      const results = (await res.json()) as NominatimSearchResult[];
+      if (results.length === 0) {
+        setErrorMessage(`לא מצאנו את הכתובת "${trimmed}". נסי לכלול רחוב ועיר.`);
+        return;
+      }
+      const coords: DriverCoords = {
+        lat: Number(results[0].lat),
+        lng: Number(results[0].lon),
+      };
+      dispatch(setDriverLocation(coords));
+      setShareLocation(true);
+      setLocationDenied(false);
+      setDetectedAddress(trimmed);
+      setManualAddressInput('');
+      setShowManualLocation(false);
+
+      // אם כבר הייתה שאלה בצ'אט — שלח מחדש לשרת עם המיקום המעודכן
+      if (lastUserQueryRef.current && !isStreaming) {
+        void sendMessageToAgent(
+          `עדכנתי מיקום ל־"${trimmed}", בדוק לי מחדש: ${lastUserQueryRef.current}`,
+          { coords, address: trimmed }
+        );
+      }
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'שגיאה בעדכון המיקום');
+    } finally {
+      setResolvingManual(false);
+    }
+  };
+
+  const handleRefreshGpsClick = async () => {
+    const coords = await requestGpsCoords();
+    if (!coords || isStreaming) return;
+
+    if (lastUserQueryRef.current) {
+      void sendMessageToAgent(
+        `ריעננתי מיקום GPS, בדוק לי מחדש: ${lastUserQueryRef.current}`,
+        { coords }
+      );
+    }
+  };
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     void sendMessageToAgent(inputText);
@@ -386,6 +585,18 @@ export default function VoiceAgentWidget() {
     recognition.start();
   };
 
+  const locationStatusLabel = !shareLocation
+    ? 'שיתוף מיקום כבוי'
+    : locatingGps
+      ? 'מאתר מיקום מדויק...'
+      : driverLocation
+        ? detectedAddress
+          ? `מיקום: ${detectedAddress}`
+          : `מיקום: ${driverLocation.lat.toFixed(4)}, ${driverLocation.lng.toFixed(4)}`
+        : locationDenied
+          ? 'אין הרשאת GPS — הזיני כתובת'
+          : 'מוכן לאיתור מיקום';
+
   return (
     <div
       dir="rtl"
@@ -403,55 +614,253 @@ export default function VoiceAgentWidget() {
       {isOpen && (
         <div
           style={{
-            width: '370px',
+            width: '385px',
             maxWidth: 'calc(100vw - 32px)',
-            height: '490px',
-            background: '#0f172a',
-            border: '1px solid #334155',
-            borderRadius: '14px',
-            boxShadow: '0 16px 40px rgba(0,0,0,0.6)',
+            height: '530px',
+            background: 'rgba(255, 255, 255, 0.98)',
+            border: '1px solid var(--ev-border)',
+            borderRadius: '18px',
+            boxShadow: '0 22px 50px rgba(15, 23, 42, 0.2)',
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            color: 'white',
+            color: 'var(--ev-text)',
           }}
         >
+          {/* כותרת חלונית הצ'אט */}
           <div
             style={{
-              padding: '12px 14px',
-              background: '#1e293b',
-              borderBottom: '1px solid #334155',
+              padding: '13px 16px',
+              background: '#0F172A',
+              color: '#FFFFFF',
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
+              gap: '10px',
             }}
           >
-            <div style={{ fontWeight: 'bold', fontSize: '0.95rem' }}>
-              🤖 העוזר החכם לטעינה
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '10px',
+                  background: '#EA580C',
+                  color: '#FFFFFF',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <svg
+                  width="17"
+                  height="17"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                </svg>
+              </span>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.2 }}>
+                  העוזר החכם לטעינה
+                </div>
+                <div style={{ fontSize: '0.73rem', color: '#94A3B8', marginTop: '2px' }}>
+                  התאמת עמדות ושריון מהיר בקול או בהקלדה
+                </div>
+              </div>
             </div>
             <button
               type="button"
               onClick={() => setIsOpen(false)}
+              title="סגור חלונית"
               style={{
-                background: 'transparent',
-                border: 'none',
-                color: '#cbd5e1',
-                fontSize: '1.1rem',
+                background: 'rgba(255, 255, 255, 0.08)',
+                border: '1px solid rgba(255, 255, 255, 0.14)',
+                borderRadius: '8px',
+                color: '#E2E8F0',
+                width: '30px',
+                height: '30px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
                 cursor: 'pointer',
+                fontSize: '0.95rem',
               }}
             >
               ✕
             </button>
           </div>
 
+          {/* פס בקרת מיקום GPS + תיקון ידני לסוכן */}
+          <div
+            style={{
+              padding: '8px 14px',
+              background: '#FFFFFF',
+              borderBottom: '1px solid #E2E8F0',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '7px',
+              fontSize: '0.75rem',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  color: '#334155',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+                title={
+                  driverLocation
+                    ? `${driverLocation.lat.toFixed(5)}, ${driverLocation.lng.toFixed(5)}`
+                    : undefined
+                }
+              >
+                <span
+                  style={{
+                    width: '8px',
+                    height: '8px',
+                    borderRadius: '50%',
+                    flexShrink: 0,
+                    background: !shareLocation
+                      ? '#94A3B8'
+                      : driverLocation
+                        ? '#16A34A'
+                        : locationDenied
+                          ? '#DC2626'
+                          : '#EA580C',
+                    display: 'inline-block',
+                  }}
+                />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {locationStatusLabel}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', gap: '5px', alignItems: 'center', flexShrink: 0 }}>
+                {shareLocation && (
+                  <button
+                    type="button"
+                    onClick={() => setShowManualLocation((prev) => !prev)}
+                    style={{
+                      background: '#FFF7ED',
+                      border: '1px solid #FED7AA',
+                      color: '#C2410C',
+                      borderRadius: '7px',
+                      padding: '3px 7px',
+                      fontSize: '0.71rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {showManualLocation ? 'סגור' : 'תקן כתובת'}
+                  </button>
+                )}
+                {shareLocation && !locatingGps && (
+                  <button
+                    type="button"
+                    onClick={() => void handleRefreshGpsClick()}
+                    title="רענן זיהוי מיקום מהדפדפן ובדוק שוב"
+                    style={{
+                      background: '#F8FAFC',
+                      border: '1px solid #CBD5E1',
+                      color: '#334155',
+                      borderRadius: '7px',
+                      padding: '3px 7px',
+                      fontSize: '0.71rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    רענן GPS
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleToggleLocationShare}
+                  style={{
+                    background: '#F8FAFC',
+                    border: '1px solid #CBD5E1',
+                    color: '#334155',
+                    borderRadius: '7px',
+                    padding: '3px 7px',
+                    fontSize: '0.71rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {shareLocation ? 'כבה' : 'הפעל'}
+                </button>
+              </div>
+            </div>
+
+            {showManualLocation && (
+              <form
+                onSubmit={(e) => void handleSaveManualAddress(e)}
+                style={{ display: 'flex', gap: '6px', alignItems: 'center' }}
+              >
+                <input
+                  type="text"
+                  value={manualAddressInput}
+                  onChange={(e) => setManualAddressInput(e.target.value)}
+                  placeholder="הקלידי רחוב ועיר (למשל רוטשילד 50 פתח תקווה)"
+                  style={{
+                    flex: 1,
+                    padding: '6px 9px',
+                    borderRadius: '8px',
+                    border: '1px solid #CBD5E1',
+                    background: '#F8FAFC',
+                    color: '#0F172A',
+                    fontSize: '0.78rem',
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={resolvingManual || !manualAddressInput.trim()}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: '8px',
+                    border: 'none',
+                    background: '#0F172A',
+                    color: '#FFFFFF',
+                    fontSize: '0.75rem',
+                    fontWeight: 600,
+                    cursor: resolvingManual ? 'wait' : 'pointer',
+                  }}
+                >
+                  {resolvingManual ? 'מאתר...' : 'עדכן'}
+                </button>
+              </form>
+            )}
+          </div>
+
+          {/* אזור ההודעות */}
           <div
             style={{
               flex: 1,
-              padding: '12px',
+              padding: '14px',
               overflowY: 'auto',
               display: 'flex',
               flexDirection: 'column',
               gap: '10px',
+              background: '#F3F6FA',
             }}
           >
             {messages.map((msg, idx) => {
@@ -461,15 +870,16 @@ export default function VoiceAgentWidget() {
                     key={idx}
                     style={{
                       alignSelf: 'flex-start',
-                      maxWidth: '85%',
-                      padding: '9px 12px',
-                      borderRadius: '12px',
+                      maxWidth: '84%',
+                      padding: '10px 13px',
+                      borderRadius: '14px 14px 14px 4px',
                       fontSize: '0.88rem',
-                      lineHeight: 1.45,
+                      lineHeight: 1.5,
                       whiteSpace: 'pre-wrap',
                       textAlign: 'right',
-                      background: '#2563eb',
-                      color: 'white',
+                      background: '#0F172A',
+                      color: '#FFFFFF',
+                      boxShadow: '0 4px 12px rgba(15, 23, 42, 0.12)',
                     }}
                   >
                     {msg.text}
@@ -484,23 +894,36 @@ export default function VoiceAgentWidget() {
                   style={{
                     alignSelf: 'flex-end',
                     maxWidth: '88%',
-                    padding: '9px 12px',
-                    borderRadius: '12px',
+                    padding: '11px 13px',
+                    borderRadius: '14px 14px 4px 14px',
                     fontSize: '0.88rem',
-                    lineHeight: 1.45,
+                    lineHeight: 1.5,
                     whiteSpace: 'pre-wrap',
                     textAlign: 'right',
-                    background: '#1e293b',
-                    border: '1px solid #334155',
-                    color: 'white',
+                    background: '#FFFFFF',
+                    border: '1px solid #E2E8F0',
+                    color: '#0F172A',
+                    boxShadow: '0 2px 8px rgba(15, 23, 42, 0.05)',
                   }}
                 >
                   <div>
-                    {cleanText || (isStreaming && idx === messages.length - 1 ? 'חושב ומחפש עמדות...' : '')}
+                    {cleanText ||
+                      (isStreaming && idx === messages.length - 1
+                        ? 'חושב ומחפש עמדות מתאימות...'
+                        : '')}
                   </div>
 
                   {stations.length > 0 && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '10px' }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '7px',
+                        marginTop: '10px',
+                        paddingTop: '10px',
+                        borderTop: '1px solid #F1F5F9',
+                      }}
+                    >
                       {stations.map((st) => (
                         <div key={st.id} style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                           {role === 'Driver' && (
@@ -508,37 +931,30 @@ export default function VoiceAgentWidget() {
                               type="button"
                               disabled={reservingStationId === st.id}
                               onClick={() => void handleReserveFromAgent(st.id)}
+                              className="ev-btn ev-btn-accent"
                               style={{
                                 flex: 1,
-                                padding: '7px 10px',
-                                borderRadius: '8px',
-                                border: 'none',
-                                background: 'var(--primary)',
-                                color: 'black',
-                                fontWeight: 'bold',
+                                width: 'auto',
+                                padding: '8px 10px',
                                 fontSize: '0.8rem',
-                                cursor: 'pointer',
                               }}
                             >
                               {reservingStationId === st.id
                                 ? 'משריין...'
-                                : `⚡ שריין את "${st.name}" (15 דק')`}
+                                : `שריין את "${st.name}" (15 דק')`}
                             </button>
                           )}
                           <button
                             type="button"
                             onClick={() => void handleOpenMapResults()}
+                            className="ev-btn ev-btn-secondary"
                             style={{
-                              padding: '7px 10px',
-                              borderRadius: '8px',
-                              border: '1px solid #475569',
-                              background: '#0f172a',
-                              color: '#e2e8f0',
+                              width: 'auto',
+                              padding: '8px 11px',
                               fontSize: '0.78rem',
-                              cursor: 'pointer',
                             }}
                           >
-                            🗺️ למפה
+                            למפה
                           </button>
                         </div>
                       ))}
@@ -550,8 +966,18 @@ export default function VoiceAgentWidget() {
             <div ref={messagesEndRef} />
           </div>
 
+          {/* הצעות מהירות לפתיחת שיחה */}
           {messages.length <= 1 && (
-            <div style={{ padding: '0 12px 8px 12px', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            <div
+              style={{
+                padding: '10px 12px',
+                background: '#F3F6FA',
+                borderTop: '1px solid #E2E8F0',
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '6px',
+              }}
+            >
               {QUICK_PROMPTS.map((prompt) => (
                 <button
                   key={prompt}
@@ -559,14 +985,16 @@ export default function VoiceAgentWidget() {
                   disabled={isStreaming}
                   onClick={() => void sendMessageToAgent(prompt)}
                   style={{
-                    background: '#1e293b',
-                    border: '1px solid #475569',
-                    color: '#cbd5e1',
+                    background: '#FFFFFF',
+                    border: '1px solid #E2E8F0',
+                    color: '#334155',
                     fontSize: '0.75rem',
-                    padding: '4px 8px',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
+                    fontWeight: 500,
+                    padding: '6px 10px',
+                    borderRadius: '10px',
+                    cursor: isStreaming ? 'not-allowed' : 'pointer',
                     textAlign: 'right',
+                    lineHeight: 1.35,
                   }}
                 >
                   {prompt}
@@ -575,17 +1003,19 @@ export default function VoiceAgentWidget() {
             </div>
           )}
 
+          {/* שגיאות והתראת הזמנה פעילה */}
           {errorMessage && (
             <div
               style={{
-                background: '#7f1d1d',
-                color: '#fecaca',
+                background: '#FEF2F2',
+                borderTop: '1px solid #FECACA',
+                color: '#B91C1C',
                 fontSize: '0.8rem',
-                padding: '8px 10px',
+                padding: '9px 12px',
                 textAlign: 'center',
               }}
             >
-              <div>⚠️ {errorMessage}</div>
+              <div>{errorMessage}</div>
               {hasActiveBookingError && (
                 <button
                   type="button"
@@ -593,32 +1023,29 @@ export default function VoiceAgentWidget() {
                     setIsOpen(false);
                     navigate('/active');
                   }}
+                  className="ev-btn ev-btn-primary"
                   style={{
-                    marginTop: '6px',
-                    padding: '4px 10px',
-                    borderRadius: '6px',
-                    border: 'none',
-                    background: 'var(--primary)',
-                    color: 'black',
-                    fontWeight: 'bold',
-                    cursor: 'pointer',
+                    width: 'auto',
+                    marginTop: '7px',
+                    padding: '5px 12px',
                     fontSize: '0.78rem',
                   }}
                 >
-                  ⏱️ עבור להזמנה הפעילה שלי ➔
+                  עבור להזמנה הפעילה שלי ➔
                 </button>
               )}
             </div>
           )}
 
+          {/* שורת קלט והקלטה */}
           <form
             onSubmit={handleSubmit}
             style={{
-              padding: '10px',
-              background: '#1e293b',
-              borderTop: '1px solid #334155',
+              padding: '10px 12px',
+              background: '#FFFFFF',
+              borderTop: '1px solid #E2E8F0',
               display: 'flex',
-              gap: '6px',
+              gap: '7px',
               alignItems: 'center',
             }}
           >
@@ -628,16 +1055,39 @@ export default function VoiceAgentWidget() {
               disabled={isStreaming}
               title={isListening ? 'עצור הקלטה' : 'הקלט בקול בעברית'}
               style={{
-                padding: '8px 10px',
-                borderRadius: '8px',
-                border: 'none',
-                background: isListening ? '#dc2626' : '#0ea5e9',
-                color: 'white',
-                cursor: 'pointer',
-                fontSize: '1rem',
+                width: '38px',
+                height: '38px',
+                borderRadius: '10px',
+                border: isListening ? '1px solid #DC2626' : '1px solid #FED7AA',
+                background: isListening ? '#DC2626' : '#FFF7ED',
+                color: isListening ? '#FFFFFF' : '#EA580C',
+                cursor: isStreaming ? 'not-allowed' : 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
               }}
             >
-              {isListening ? '⏹️' : '🎤'}
+              {isListening ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="6" y="6" width="12" height="12" rx="2" />
+                </svg>
+              ) : (
+                <svg
+                  width="17"
+                  height="17"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.1"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" y1="19" x2="12" y2="22" />
+                </svg>
+              )}
             </button>
 
             <input
@@ -648,12 +1098,13 @@ export default function VoiceAgentWidget() {
               disabled={isStreaming}
               style={{
                 flex: 1,
-                padding: '8px 10px',
-                borderRadius: '8px',
-                border: isListening ? '1px solid #ef4444' : '1px solid #475569',
-                background: '#0f172a',
-                color: 'white',
+                padding: '9px 11px',
+                borderRadius: '10px',
+                border: isListening ? '1.5px solid #DC2626' : '1px solid #CBD5E1',
+                background: '#F8FAFC',
+                color: '#0F172A',
                 fontSize: '0.88rem',
+                outline: 'none',
               }}
             />
 
@@ -661,14 +1112,15 @@ export default function VoiceAgentWidget() {
               type="submit"
               disabled={isStreaming || !inputText.trim()}
               style={{
-                padding: '8px 12px',
-                borderRadius: '8px',
+                padding: '9px 14px',
+                borderRadius: '10px',
                 border: 'none',
-                background: 'var(--primary)',
-                color: 'black',
-                fontWeight: 'bold',
-                cursor: 'pointer',
+                background: isStreaming || !inputText.trim() ? '#CBD5E1' : '#0F172A',
+                color: '#FFFFFF',
+                fontWeight: 700,
+                cursor: isStreaming || !inputText.trim() ? 'not-allowed' : 'pointer',
                 fontSize: '0.85rem',
+                flexShrink: 0,
               }}
             >
               שלח
@@ -677,23 +1129,39 @@ export default function VoiceAgentWidget() {
         </div>
       )}
 
+      {/* כפתורים צפים בתחתית המסך */}
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
         <button
           type="button"
           onClick={() => setIsOpen((prev) => !prev)}
           style={{
             padding: '10px 16px',
-            borderRadius: '999px',
-            border: '1px solid #38bdf8',
-            background: '#0f172a',
-            color: 'white',
-            fontWeight: 'bold',
+            borderRadius: '12px',
+            border: '1px solid #1E293B',
+            background: '#0F172A',
+            color: '#FFFFFF',
+            fontWeight: 700,
             cursor: 'pointer',
-            boxShadow: '0 6px 20px rgba(0,0,0,0.45)',
-            fontSize: '0.9rem',
+            boxShadow: '0 8px 22px rgba(15, 23, 42, 0.22)',
+            fontSize: '0.88rem',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '7px',
           }}
         >
-          {isOpen ? 'סגור עוזר' : '🤖 עוזר חכם'}
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#EA580C"
+            strokeWidth="2.3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+          </svg>
+          <span>{isOpen ? 'סגור עוזר' : 'עוזר חכם'}</span>
         </button>
 
         <button
@@ -702,18 +1170,37 @@ export default function VoiceAgentWidget() {
           disabled={isStreaming}
           title="קיצור דרך להקלטת הודעה קולית לסוכן"
           style={{
-            padding: '10px 14px',
-            borderRadius: '999px',
+            padding: '10px 15px',
+            borderRadius: '12px',
             border: 'none',
-            background: isListening ? '#dc2626' : 'var(--primary)',
-            color: isListening ? 'white' : 'black',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            boxShadow: '0 6px 20px rgba(0,0,0,0.45)',
-            fontSize: '0.9rem',
+            background: isListening ? '#DC2626' : '#EA580C',
+            color: '#FFFFFF',
+            fontWeight: 700,
+            cursor: isStreaming ? 'not-allowed' : 'pointer',
+            boxShadow: isListening
+              ? '0 8px 22px rgba(220, 38, 38, 0.35)'
+              : '0 8px 22px rgba(234, 88, 12, 0.28)',
+            fontSize: '0.88rem',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '7px',
           }}
         >
-          {isListening ? '🔴 מקליט... לחצי לעצירה' : '🎤 הקלט לסוכן'}
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+            <line x1="12" y1="19" x2="12" y2="22" />
+          </svg>
+          <span>{isListening ? 'מקליט... לחצי לעצירה' : 'הקלט לסוכן'}</span>
         </button>
       </div>
     </div>
