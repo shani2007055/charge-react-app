@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { DriverCoords, Station } from '../store/stations/stationsState';
@@ -7,6 +7,7 @@ export interface MapStationItem {
   station: Station;
   distanceKm?: number;
   matchPercentage?: number;
+  etaMinutes?: number;
 }
 
 interface StationsMapProps {
@@ -14,7 +15,57 @@ interface StationsMapProps {
   driverLocation: DriverCoords | null;
   hasActiveBooking: boolean;
   reservingId: number | null;
-  onReserve: (station: Station) => void;
+  selectedStationId?: number | null;
+  onReserve: (station: Station, distanceKm?: number) => void;
+}
+
+const DEFAULT_CENTER: L.LatLngTuple = [32.0853, 34.7818];
+const DEFAULT_ZOOM = 11;
+
+function isValidCoords(lat: number, lng: number): boolean {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  if (lat === 0 && lng === 0) return false;
+  return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+
+function spreadOverlappingStations(items: MapStationItem[]): Array<{
+  item: MapStationItem;
+  lat: number;
+  lng: number;
+}> {
+  const groups = new Map<string, MapStationItem[]>();
+  const validItems: MapStationItem[] = [];
+
+  items.forEach((item) => {
+    const { latitude, longitude } = item.station;
+    if (!isValidCoords(latitude, longitude)) return;
+    validItems.push(item);
+    const key = `${latitude.toFixed(4)}:${longitude.toFixed(4)}`;
+    const list = groups.get(key) ?? [];
+    list.push(item);
+    groups.set(key, list);
+  });
+
+  const groupIndex = new Map<string, number>();
+
+  return validItems.map((item) => {
+    const { latitude, longitude } = item.station;
+    const key = `${latitude.toFixed(4)}:${longitude.toFixed(4)}`;
+    const group = groups.get(key) ?? [item];
+    if (group.length <= 1) {
+      return { item, lat: latitude, lng: longitude };
+    }
+
+    const idx = groupIndex.get(key) ?? 0;
+    groupIndex.set(key, idx + 1);
+    const angle = (2 * Math.PI * idx) / group.length;
+    const radius = 0.00045;
+    return {
+      item,
+      lat: latitude + Math.sin(angle) * radius,
+      lng: longitude + Math.cos(angle) * radius,
+    };
+  });
 }
 
 export default function StationsMap({
@@ -22,32 +73,111 @@ export default function StationsMap({
   driverLocation,
   hasActiveBooking,
   reservingId,
+  selectedStationId = null,
   onReserve,
 }: StationsMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layerGroupRef = useRef<L.LayerGroup | null>(null);
+  const markersByIdRef = useRef<Map<number, L.Marker>>(new Map());
+  const lastBoundsKeyRef = useRef<string>('');
+  const onReserveRef = useRef(onReserve);
 
   useEffect(() => {
-    if (!containerRef.current) return;
+    onReserveRef.current = onReserve;
+  }, [onReserve]);
 
-    const map = L.map(containerRef.current, {
-      center: [32.0853, 34.7818],
-      zoom: 11,
+  const computeBoundsPoints = useCallback((): L.LatLngTuple[] => {
+    const points: L.LatLngTuple[] = [];
+    if (driverLocation && isValidCoords(driverLocation.lat, driverLocation.lng)) {
+      points.push([driverLocation.lat, driverLocation.lng]);
+    }
+    spreadOverlappingStations(stations).forEach(({ lat, lng }) => {
+      points.push([lat, lng]);
+    });
+    return points;
+  }, [stations, driverLocation]);
+
+  const fitMapToPoints = useCallback((points: L.LatLngTuple[], animate = false) => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    map.invalidateSize({ animate: false });
+
+    if (points.length === 0) {
+      map.setView(DEFAULT_CENTER, DEFAULT_ZOOM, { animate });
+      return;
+    }
+
+    if (points.length === 1) {
+      map.setView(points[0], 14, { animate });
+      return;
+    }
+
+    map.fitBounds(L.latLngBounds(points), {
+      padding: [42, 42],
+      maxZoom: 15,
+      animate,
+    });
+  }, []);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const map = L.map(container, {
+      center: DEFAULT_CENTER,
+      zoom: DEFAULT_ZOOM,
+      zoomControl: true,
     });
 
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap &copy; CARTO',
+    const primaryTiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
     }).addTo(map);
+
+    let fallbackApplied = false;
+    primaryTiles.on('tileerror', () => {
+      if (fallbackApplied) return;
+      fallbackApplied = true;
+      map.removeLayer(primaryTiles);
+      L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+        {
+          attribution: 'Tiles &copy; Esri',
+          maxZoom: 19,
+        }
+      ).addTo(map);
+    });
 
     const layerGroup = L.layerGroup().addTo(map);
     mapRef.current = map;
     layerGroupRef.current = layerGroup;
 
+    const invalidate = () => {
+      map.invalidateSize({ animate: false });
+    };
+
+    const rafId = window.requestAnimationFrame(invalidate);
+    const timerId = window.setTimeout(invalidate, 200);
+    const handleWindowResize = () => invalidate();
+    window.addEventListener('resize', handleWindowResize);
+
+    const resizeObserver = new ResizeObserver(() => {
+      invalidate();
+    });
+    resizeObserver.observe(container);
+
     return () => {
+      window.cancelAnimationFrame(rafId);
+      window.clearTimeout(timerId);
+      window.removeEventListener('resize', handleWindowResize);
+      resizeObserver.disconnect();
       map.remove();
       mapRef.current = null;
       layerGroupRef.current = null;
+      markersByIdRef.current.clear();
+      lastBoundsKeyRef.current = '';
     };
   }, []);
 
@@ -57,42 +187,48 @@ export default function StationsMap({
     if (!map || !layerGroup) return;
 
     layerGroup.clearLayers();
-    const boundsPoints: L.LatLngExpression[] = [];
+    markersByIdRef.current.clear();
 
-    if (driverLocation) {
+    const boundsPoints: L.LatLngTuple[] = [];
+
+    if (driverLocation && isValidCoords(driverLocation.lat, driverLocation.lng)) {
       const driverIcon = L.divIcon({
-        className: '',
-        html: '<div style="width:28px;height:28px;border-radius:9999px;background:#0F172A;border:3px solid #FFFFFF;display:flex;align-items:center;justify-content:center;color:#FFFFFF;font-size:11px;font-weight:700;box-shadow:0 4px 12px rgba(15,23,42,0.28);font-family:Heebo,sans-serif;">אני</div>',
-        iconSize: [28, 28],
-        iconAnchor: [14, 14],
+        className: 'ev-map-pin-anchor',
+        html: '<div class="ev-map-driver-pin">אני</div>',
+        iconSize: [0, 0],
+        iconAnchor: [0, 0],
       });
 
-      const driverMarker = L.marker([driverLocation.lat, driverLocation.lng], { icon: driverIcon });
+      const driverMarker = L.marker([driverLocation.lat, driverLocation.lng], {
+        icon: driverIcon,
+        zIndexOffset: 500,
+      });
       driverMarker.bindPopup(
-        '<div dir="rtl" style="font-weight:600;color:#0F172A;font-family:Heebo,sans-serif;">המיקום שלך</div>'
+        '<div dir="rtl" style="font-weight:600;color:#0F172A;">המיקום שלך</div>'
       );
       driverMarker.addTo(layerGroup);
       boundsPoints.push([driverLocation.lat, driverLocation.lng]);
     }
 
-    stations.forEach((item) => {
-      const { station, distanceKm, matchPercentage } = item;
+    const spreadStations = spreadOverlappingStations(stations);
+
+    spreadStations.forEach(({ item, lat, lng }) => {
+      const { station, distanceKm, matchPercentage, etaMinutes } = item;
       const isFaulty = !station.isActive || station.currentStatus === 'Faulty';
-      const bgColor = isFaulty ? '#DC2626' : '#EA580C';
+      const isSelected = selectedStationId === station.id;
+      const bgColor = isFaulty ? '#DC2626' : isSelected ? '#0F172A' : '#EA580C';
+      const label = isFaulty ? 'תקלה' : `${station.maxKw}kW`;
 
       const stationIcon = L.divIcon({
-        className: '',
-        html: `<div style="padding:4px 8px;border-radius:8px;background:${bgColor};border:2px solid #FFFFFF;color:#FFFFFF;font-size:11px;font-weight:700;white-space:nowrap;box-shadow:0 4px 12px rgba(15,23,42,0.22);font-family:Heebo,sans-serif;">${
-          isFaulty ? 'תקלה' : `${station.maxKw}kW`
-        }</div>`,
-        iconSize: [52, 26],
-        iconAnchor: [26, 13],
+        className: 'ev-map-pin-anchor',
+        html: `<div class="ev-map-pin-badge${isSelected ? ' selected' : ''}" style="background:${bgColor};">${label}</div>`,
+        iconSize: [0, 0],
+        iconAnchor: [0, 0],
       });
 
       const popupContainer = document.createElement('div');
       popupContainer.setAttribute('dir', 'rtl');
-      popupContainer.style.minWidth = '200px';
-      popupContainer.style.fontFamily = 'Heebo, system-ui, sans-serif';
+      popupContainer.style.minWidth = '210px';
       popupContainer.style.color = '#0F172A';
 
       const title = document.createElement('div');
@@ -122,47 +258,94 @@ export default function StationsMap({
       if (!isFaulty) {
         const reserveBtn = document.createElement('button');
         reserveBtn.type = 'button';
+        const windowText = etaMinutes !== undefined ? `הגעה ~${etaMinutes} דק׳` : 'שריון דינמי';
         reserveBtn.textContent =
           reservingId === station.id
             ? 'משריין...'
             : hasActiveBooking
               ? 'קיימת הזמנה פעילה'
-              : 'שריין עמדה (15 דק׳)';
+              : `שריין עמדה (${windowText})`;
         reserveBtn.disabled = hasActiveBooking || reservingId === station.id;
         reserveBtn.style.width = '100%';
-        reserveBtn.style.padding = '7px 12px';
+        reserveBtn.style.padding = '8px 12px';
         reserveBtn.style.border = 'none';
         reserveBtn.style.borderRadius = '8px';
         reserveBtn.style.background = hasActiveBooking ? '#94A3B8' : '#0F172A';
         reserveBtn.style.color = '#FFFFFF';
         reserveBtn.style.fontWeight = '600';
         reserveBtn.style.fontSize = '12px';
+        reserveBtn.style.fontFamily = 'Heebo, system-ui, sans-serif';
         reserveBtn.style.cursor = hasActiveBooking ? 'not-allowed' : 'pointer';
-        reserveBtn.addEventListener('click', () => onReserve(station));
+        reserveBtn.addEventListener('click', () => onReserveRef.current(station, distanceKm));
         popupContainer.appendChild(reserveBtn);
       }
 
-      const marker = L.marker([station.latitude, station.longitude], { icon: stationIcon });
+      const marker = L.marker([lat, lng], {
+        icon: stationIcon,
+        zIndexOffset: isSelected ? 400 : 100,
+      });
       marker.bindPopup(popupContainer);
       marker.addTo(layerGroup);
-      boundsPoints.push([station.latitude, station.longitude]);
+      markersByIdRef.current.set(station.id, marker);
+      boundsPoints.push([lat, lng]);
     });
 
-    if (boundsPoints.length > 0) {
-      map.fitBounds(L.latLngBounds(boundsPoints), { padding: [36, 36], maxZoom: 13 });
+    const boundsKey = JSON.stringify({
+      driver: driverLocation,
+      stations: spreadStations.map((s) => [s.item.station.id, s.lat, s.lng]),
+    });
+
+    if (boundsKey !== lastBoundsKeyRef.current) {
+      lastBoundsKeyRef.current = boundsKey;
+      fitMapToPoints(boundsPoints, false);
     }
-  }, [stations, driverLocation, hasActiveBooking, reservingId, onReserve]);
+  }, [stations, driverLocation, hasActiveBooking, reservingId, selectedStationId, fitMapToPoints]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || selectedStationId === null) return;
+
+    const marker = markersByIdRef.current.get(selectedStationId);
+    if (!marker) return;
+
+    map.invalidateSize({ animate: false });
+    map.flyTo(marker.getLatLng(), Math.max(map.getZoom(), 15), { duration: 0.45 });
+    marker.openPopup();
+  }, [selectedStationId]);
+
+  const handleRecenter = () => {
+    fitMapToPoints(computeBoundsPoints(), true);
+  };
 
   return (
-    <div
-      ref={containerRef}
-      style={{
-        width: '100%',
-        height: '440px',
-        borderRadius: '12px',
-        overflow: 'hidden',
-        border: '1px solid var(--ev-border)',
-      }}
-    />
+    <div>
+      <div className="ev-map-toolbar">
+        <div className="ev-map-legend">
+          <span className="ev-map-legend-item">
+            <span className="ev-map-dot" style={{ background: '#0F172A' }} />
+            המיקום שלך
+          </span>
+          <span className="ev-map-legend-item">
+            <span className="ev-map-dot" style={{ background: '#EA580C' }} />
+            עמדה זמינה
+          </span>
+          <span className="ev-map-legend-item">
+            <span className="ev-map-dot" style={{ background: '#DC2626' }} />
+            תקלה / לא פעילה
+          </span>
+        </div>
+
+        <button
+          type="button"
+          className="ev-btn ev-btn-secondary ev-btn-auto"
+          style={{ padding: '5px 10px', fontSize: '0.78rem' }}
+          onClick={handleRecenter}
+        >
+          מרכז מפה
+        </button>
+      </div>
+
+      <div ref={containerRef} className="ev-map-canvas" />
+    </div>
   );
 }

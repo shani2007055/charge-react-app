@@ -46,12 +46,51 @@ interface ChargeBooking {
   createdAt: string;
 }
 
+interface NominatimAddress {
+  house_number?: string;
+}
+
 interface NominatimResult {
+  class?: string;
   lat: string;
   lon: string;
+  address?: NominatimAddress;
 }
 
 type OwnerTab = 'stations' | 'bookings' | 'feedback';
+
+function normalizeAddressQuery(raw: string): string {
+  return raw
+    .trim()
+    .replace(/(^|\s)(רחוב|רח׳|רח'|מס'|מספר)\s+/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function resolveAddressCoords(rawAddress: string): Promise<{ lat: number; lng: number } | null> {
+  const query = normalizeAddressQuery(rawAddress);
+  if (!query) return null;
+
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=il&accept-language=he&limit=5&q=${encodeURIComponent(query)}`
+  );
+  if (!res.ok) {
+    throw new Error('שגיאה באיתור הכתובת');
+  }
+
+  const results = (await res.json()) as NominatimResult[];
+  if (results.length === 0) return null;
+
+  // תעדוף תוצאה עם מספר בית מדויק על פני מרכז רחוב
+  const best =
+    results.find((r) => Boolean(r.address?.house_number || r.class === 'building')) ?? results[0];
+
+  const lat = Number(best.lat);
+  const lng = Number(best.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  return { lat, lng };
+}
 
 function getBookingStatusStyle(status: string): { label: string; bg: string; color: string; border: string } {
   if (status === 'Completed') {
@@ -86,7 +125,6 @@ export default function StationOwnerScreen() {
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // ניווט וניקיון תצוגה
   const [activeTab, setActiveTab] = useState<OwnerTab>('stations');
   const [showAddForm, setShowAddForm] = useState<boolean>(false);
 
@@ -101,9 +139,11 @@ export default function StationOwnerScreen() {
   // שדות לעריכת עמדה קיימת
   const [editingStationId, setEditingStationId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
+  const [editAddress, setEditAddress] = useState('');
   const [editPrice, setEditPrice] = useState('');
   const [editMaxKw, setEditMaxKw] = useState('');
   const [editChargerType, setEditChargerType] = useState<'CCS' | 'Type2'>('CCS');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const loadOwnerData = async () => {
     try {
@@ -143,16 +183,10 @@ export default function StationOwnerScreen() {
     try {
       setSaving(true);
 
-      const geoRes = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&countrycodes=il&limit=1&q=${encodeURIComponent(address.trim())}`
-      );
-      if (!geoRes.ok) {
-        throw new Error('שגיאה באיתור הכתובת');
-      }
-      const geoData = (await geoRes.json()) as NominatimResult[];
-      if (geoData.length === 0) {
+      const coords = await resolveAddressCoords(address);
+      if (!coords) {
         throw new Error(
-          `לא הצלחנו לאתר את הכתובת "${address}". נסי לרשום רחוב, מספר ועיר (למשל: רוטשילד 50 תל אביב).`
+          `לא הצלחנו לאתר את הכתובת "${address}". נסי לרשום רחוב, מספר בית ועיר (למשל: התשעים ושלוש 5, פתח תקווה).`
         );
       }
 
@@ -160,9 +194,9 @@ export default function StationOwnerScreen() {
         method: 'POST',
         body: JSON.stringify({
           name,
-          address,
-          latitude: Number(geoData[0].lat),
-          longitude: Number(geoData[0].lon),
+          address: address.trim(),
+          latitude: coords.lat,
+          longitude: coords.lng,
           chargerType,
           maxKw: Number(maxKw),
           pricePerKwh: Number(pricePerKwh),
@@ -199,6 +233,7 @@ export default function StationOwnerScreen() {
   const startEditing = (station: Station) => {
     setEditingStationId(station.id);
     setEditName(station.name);
+    setEditAddress(station.address);
     setEditPrice(String(station.pricePerKwh));
     setEditMaxKw(String(station.maxKw));
     setEditChargerType(station.chargerType === 'Type2' ? 'Type2' : 'CCS');
@@ -208,13 +243,24 @@ export default function StationOwnerScreen() {
     try {
       setError(null);
       setSuccessMessage(null);
+      setSavingEdit(true);
+
+      const trimmedAddress = editAddress.trim() || station.address;
+      const resolved = await resolveAddressCoords(trimmedAddress);
+
+      if (!resolved && trimmedAddress !== station.address.trim()) {
+        throw new Error(
+          `לא הצלחנו לאתר את הכתובת "${trimmedAddress}". נסי לרשום רחוב, מספר בית ועיר.`
+        );
+      }
+
       await apiFetch(`/ChargingStations/${station.id}`, {
         method: 'PUT',
         body: JSON.stringify({
           name: editName,
-          address: station.address,
-          latitude: station.latitude,
-          longitude: station.longitude,
+          address: trimmedAddress,
+          latitude: resolved ? resolved.lat : station.latitude,
+          longitude: resolved ? resolved.lng : station.longitude,
           chargerType: editChargerType,
           maxKw: Number(editMaxKw),
           pricePerKwh: Number(editPrice),
@@ -226,6 +272,8 @@ export default function StationOwnerScreen() {
       await loadOwnerData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בעדכון פרטי העמדה');
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -303,7 +351,17 @@ export default function StationOwnerScreen() {
       )}
 
       {successMessage && (
-        <div className="ev-alert-success" style={{ marginBottom: 0 }}>
+        <div
+          style={{
+            background: '#ECFDF5',
+            border: '1px solid #A7F3D0',
+            color: '#047857',
+            padding: '12px 16px',
+            borderRadius: '10px',
+            fontSize: '0.88rem',
+            fontWeight: 500,
+          }}
+        >
           {successMessage}
         </div>
       )}
@@ -322,7 +380,7 @@ export default function StationOwnerScreen() {
               <div className="screen-header" style={{ marginBottom: '16px' }}>
                 <div>
                   <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>הוספת עמדת טעינה חדשה</div>
-                  <p className="ev-subtitle">הכתובת מאותרת אוטומטית ומוצגת לנהגים במפה</p>
+                  <p className="ev-subtitle">הכתובת מאותרת אוטומטית לפי רחוב, מספר בית ועיר</p>
                 </div>
               </div>
 
@@ -350,7 +408,7 @@ export default function StationOwnerScreen() {
                     type="text"
                     className="form-control"
                     required
-                    placeholder="רוטשילד 50, תל אביב"
+                    placeholder="התשעים ושלוש 5, פתח תקווה"
                     value={address}
                     onChange={(e) => setAddress(e.target.value)}
                   />
@@ -587,7 +645,7 @@ export default function StationOwnerScreen() {
               <div className="screen-header">
                 <div>
                   <div>העמדות שלי</div>
-                  <p className="ev-subtitle">עדכון תעריף, הספק, הפעלה/השבתה וטיפול בתקלות</p>
+                  <p className="ev-subtitle">עדכון תעריף, הספק, כתובת, הפעלה/השבתה וטיפול בתקלות</p>
                 </div>
               </div>
 
@@ -650,7 +708,7 @@ export default function StationOwnerScreen() {
                               }}
                             >
                               {station.currentStatus === 'Faulty'
-                                ? 'דווחה תקלה'
+                                ? 'תקלה (דווח ע"י נהג)'
                                 : station.isActive
                                   ? 'פעילה ותקינה'
                                   : 'מושבתת'}
@@ -716,6 +774,15 @@ export default function StationOwnerScreen() {
                             />
                           </div>
                           <div className="form-group" style={{ marginBottom: 0 }}>
+                            <label>כתובת</label>
+                            <input
+                              type="text"
+                              className="form-control"
+                              value={editAddress}
+                              onChange={(e) => setEditAddress(e.target.value)}
+                            />
+                          </div>
+                          <div className="form-group" style={{ marginBottom: 0 }}>
                             <label>מחיר (₪/kWh)</label>
                             <input
                               type="number"
@@ -748,9 +815,10 @@ export default function StationOwnerScreen() {
                           <button
                             type="button"
                             className="ev-btn"
+                            disabled={savingEdit}
                             onClick={() => void handleSaveEdit(station)}
                           >
-                            שמור שינויים
+                            {savingEdit ? 'מעדכן...' : 'שמור שינויים'}
                           </button>
                         </div>
                       )}

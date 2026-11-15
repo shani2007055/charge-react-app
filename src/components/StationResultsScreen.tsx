@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAppSelector, useAppDispatch } from '../store/hooks';
-import { fetchStations } from '../store/stations/stationsThunks';
 import { apiFetch } from '../api/apiClient';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
 import type { Station } from '../store/stations/stationsState';
+import { fetchStations } from '../store/stations/stationsThunks';
 import StationsMap, { type MapStationItem } from './StationsMap';
 
 interface VehicleDto {
@@ -70,6 +70,7 @@ export default function StationResultsScreen() {
   const [reservingId, setReservingId] = useState<number | null>(null);
   const [showMap, setShowMap] = useState<boolean>(true);
   const [quickFilter, setQuickFilter] = useState<QuickFilter>('all');
+  const [selectedStationId, setSelectedStationId] = useState<number | null>(null);
 
   useEffect(() => {
     if (!hasSearched) {
@@ -187,20 +188,30 @@ export default function StationResultsScreen() {
         station: rec.station,
         distanceKm: rec.distanceKm,
         matchPercentage: rec.matchPercentage,
+        etaMinutes: estimateReservationWindow(rec.distanceKm).totalMinutes,
       }));
     }
-    return filteredItems.map((station) => ({
-      station,
-      distanceKm: driverLocation
+    return filteredItems.map((station) => {
+      const distanceKm = driverLocation
         ? calculateDistanceKm(
             driverLocation.lat,
             driverLocation.lng,
             station.latitude,
             station.longitude
           )
-        : undefined,
-    }));
+        : undefined;
+      return {
+        station,
+        distanceKm,
+        etaMinutes: estimateReservationWindow(distanceKm ?? null).totalMinutes,
+      };
+    });
   }, [hasSearched, filteredRecommendations, filteredItems, driverLocation]);
+
+  const handleFocusOnMap = (stationId: number) => {
+    setShowMap(true);
+    setSelectedStationId(stationId);
+  };
 
   if (loading) {
     return (
@@ -227,6 +238,7 @@ export default function StationResultsScreen() {
   }
 
   const displayedCount = hasSearched ? filteredRecommendations.length : filteredItems.length;
+  const canRenderMap = showMap && (mapStations.length > 0 || driverLocation !== null);
 
   return (
     <div className="container" dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
@@ -288,6 +300,7 @@ export default function StationResultsScreen() {
               className="ev-btn ev-btn-secondary ev-btn-auto"
               onClick={() => {
                 setQuickFilter('all');
+                setSelectedStationId(null);
                 void dispatch(fetchStations());
               }}
             >
@@ -295,15 +308,13 @@ export default function StationResultsScreen() {
             </button>
           )}
 
-          {mapStations.length > 0 && (
-            <button
-              type="button"
-              className="ev-btn ev-btn-secondary ev-btn-auto"
-              onClick={() => setShowMap((prev) => !prev)}
-            >
-              {showMap ? 'הסתר מפה' : 'הצג מפה'}
-            </button>
-          )}
+          <button
+            type="button"
+            className="ev-btn ev-btn-secondary ev-btn-auto"
+            onClick={() => setShowMap((prev) => !prev)}
+          >
+            {showMap ? 'הסתר מפה' : 'הצג מפה'}
+          </button>
         </div>
       </div>
 
@@ -349,19 +360,9 @@ export default function StationResultsScreen() {
       )}
 
       {/* פריסת Split-View: רשימת עמדות + מפה בהירה */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns:
-            showMap && mapStations.length > 0
-              ? 'repeat(auto-fit, minmax(340px, 1fr))'
-              : 'minmax(0, 1fr)',
-          gap: '20px',
-          alignItems: 'start',
-        }}
-      >
+      <div className={`ev-results-split ${canRenderMap ? 'with-map' : ''}`}>
         {/* רשימת עמדות */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div className="ev-results-list">
           {hasSearched ? (
             filteredRecommendations.length === 0 ? (
               <div className="ev-card" style={{ textAlign: 'center', padding: '32px' }}>
@@ -381,13 +382,18 @@ export default function StationResultsScreen() {
             ) : (
               filteredRecommendations.map((rec) => {
                 const eta = estimateReservationWindow(rec.distanceKm);
+                const isSelected = selectedStationId === rec.station.id;
                 return (
                   <div
                     key={rec.station.id}
                     className="ev-card"
                     style={{
                       padding: '18px 20px',
-                      borderColor: rec.isEmergencyMode ? 'var(--ev-danger-border)' : undefined,
+                      borderColor: isSelected
+                        ? 'var(--ev-brand)'
+                        : rec.isEmergencyMode
+                          ? 'var(--ev-danger-border)'
+                          : undefined,
                       background: rec.isEmergencyMode ? 'var(--ev-danger-soft)' : undefined,
                     }}
                   >
@@ -474,16 +480,25 @@ export default function StationResultsScreen() {
                         {rec.station.pricePerKwh} לקוט&quot;ש
                       </span>
 
-                      <button
-                        type="button"
-                        className="ev-btn ev-btn-auto"
-                        disabled={reservingId === rec.station.id || hasActiveBooking}
-                        onClick={() => void handleReserveStation(rec.station, rec.distanceKm)}
-                      >
-                        {reservingId === rec.station.id
-                          ? 'משריין עמדה...'
-                          : `שריין עמדה (הגעה ~${eta.totalMinutes} דק׳)`}
-                      </button>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          className="ev-btn ev-btn-secondary ev-btn-auto"
+                          onClick={() => handleFocusOnMap(rec.station.id)}
+                        >
+                          הצג במפה
+                        </button>
+                        <button
+                          type="button"
+                          className="ev-btn ev-btn-auto"
+                          disabled={reservingId === rec.station.id || hasActiveBooking}
+                          onClick={() => void handleReserveStation(rec.station, rec.distanceKm)}
+                        >
+                          {reservingId === rec.station.id
+                            ? 'משריין עמדה...'
+                            : `שריין עמדה (הגעה ~${eta.totalMinutes} דק׳)`}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -509,6 +524,7 @@ export default function StationResultsScreen() {
           ) : (
             filteredItems.map((station) => {
               const isFaulty = !station.isActive || station.currentStatus === 'Faulty';
+              const isSelected = selectedStationId === station.id;
               const distKm = driverLocation
                 ? calculateDistanceKm(
                     driverLocation.lat,
@@ -518,9 +534,15 @@ export default function StationResultsScreen() {
                   )
                 : null;
               const eta = estimateReservationWindow(distKm);
-
               return (
-                <div key={station.id} className="ev-card" style={{ padding: '18px 20px' }}>
+                <div
+                  key={station.id}
+                  className="ev-card"
+                  style={{
+                    padding: '18px 20px',
+                    borderColor: isSelected ? 'var(--ev-brand)' : undefined,
+                  }}
+                >
                   <div
                     style={{
                       display: 'flex',
@@ -548,7 +570,6 @@ export default function StationResultsScreen() {
                         {distKm !== null && ` · ${distKm} ק"מ ממך (הגעה ~${eta.travelMinutes} דק')`}
                       </div>
                     </div>
-
                     <span
                       style={{
                         fontSize: '0.78rem',
@@ -559,7 +580,6 @@ export default function StationResultsScreen() {
                       {station.currentStatus ?? (station.isActive ? 'זמינה' : 'לא פעילה')}
                     </span>
                   </div>
-
                   <div
                     style={{
                       marginTop: '14px',
@@ -580,19 +600,27 @@ export default function StationResultsScreen() {
                       דירוג {station.averageRating !== null ? station.averageRating.toFixed(1) : 'חדשה'} (
                       {station.reviewsCount})
                     </span>
-
-                    <button
-                      type="button"
-                      className="ev-btn ev-btn-auto"
-                      disabled={!station.isActive || reservingId === station.id || hasActiveBooking}
-                      onClick={() => void handleReserveStation(station, distKm ?? undefined)}
-                    >
-                      {reservingId === station.id
-                        ? 'משריין עמדה...'
-                        : distKm !== null
-                          ? `שריין עמדה (הגעה ~${eta.totalMinutes} דק׳)`
-                          : 'שריין עמדה'}
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="ev-btn ev-btn-secondary ev-btn-auto"
+                        onClick={() => handleFocusOnMap(station.id)}
+                      >
+                        הצג במפה
+                      </button>
+                      <button
+                        type="button"
+                        className="ev-btn ev-btn-auto"
+                        disabled={!station.isActive || reservingId === station.id || hasActiveBooking}
+                        onClick={() => void handleReserveStation(station, distKm ?? undefined)}
+                      >
+                        {reservingId === station.id
+                          ? 'משריין עמדה...'
+                          : distKm !== null
+                            ? `שריין עמדה (הגעה ~${eta.totalMinutes} דק׳)`
+                            : 'שריין עמדה'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               );
@@ -601,14 +629,15 @@ export default function StationResultsScreen() {
         </div>
 
         {/* מפה בהירה */}
-        {showMap && mapStations.length > 0 && (
-          <div className="ev-card" style={{ padding: '8px', position: 'sticky', top: '84px' }}>
+        {canRenderMap && (
+          <div className="ev-map-card">
             <StationsMap
               stations={mapStations}
               driverLocation={driverLocation}
               hasActiveBooking={hasActiveBooking}
               reservingId={reservingId}
-              onReserve={(station) => void handleReserveStation(station)}
+              selectedStationId={selectedStationId}
+              onReserve={(station, distanceKm) => void handleReserveStation(station, distanceKm)}
             />
           </div>
         )}
