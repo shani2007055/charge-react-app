@@ -5,6 +5,9 @@ import { fetchStations, recommendStations } from '../store/stations/stationsThun
 import { setDriverLocation, setSearchBattery } from '../store/stations/stationsSlice';
 import PageHeader from './ui/PageHeader';
 import { MapPin, ListFilter } from 'lucide-react';
+import VehicleSelector from './ui/VehicleSelector';
+import type { Vehicle } from '../types/Vehicle';
+import { setSelectedVehicle } from '../store/stations/stationsSlice';
 
 interface NominatimAddress {
   road?: string;
@@ -76,14 +79,19 @@ export default function DriverSearchScreen() {
 
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
-  const { loading } = useAppSelector((state) => state.stations);
+const { loading } = useAppSelector(
+  state => state.stations
+);
 
+const [selectedVehicle, setVehicle] =
+  useState<Vehicle | null>(null);
   const isBusy = loading || searchingLocation;
 
   // חישוב אומדן טעינה ועלות מראש (צד לקוח בלבד)
   const neededPercent = Math.max(0, targetBattery - batteryLevel);
-  const estimatedKwhNeeded = (neededPercent / 100) * 60;
-  const estimatedCostNis = estimatedKwhNeeded * 1.58;
+const estimatedKwhNeeded =
+  (neededPercent / 100) *
+  (selectedVehicle?.batteryCapacityKwh ?? 60);  const estimatedCostNis = estimatedKwhNeeded * 1.58;
   const estimatedMinutesFast = neededPercent === 0 ? 0 : Math.max(5, Math.round((estimatedKwhNeeded / 90) * 60));
 
   useEffect(() => {
@@ -149,22 +157,75 @@ export default function DriverSearchScreen() {
     setErrorMessage('');
   };
 
-  const handleBatteryChange = (e: ChangeEvent<HTMLInputElement>) => {
-    const val = Number(e.target.value);
-    setBatteryLevel(val);
-    setEstimatedRange(`כ-${Math.round(val * 3)} ק"מ`);
-    if (val <= 15) {
-      setBatteryStatusText(`מצב חירום — סוללה קריטית (${val}%)`);
-      setBatteryColor('var(--ev-danger)');
-    } else if (val <= 50) {
-      setBatteryStatusText(`סוללה במצב בינוני (${val}%)`);
-      setBatteryColor('var(--ev-warning)');
-    } else {
-      setBatteryStatusText(`סוללה תקינה (${val}%)`);
-      setBatteryColor('var(--ev-brand)');
-    }
-  };
+  function updateBattery(val: number) {
 
+  setBatteryLevel(val);
+
+  setEstimatedRange(
+    `כ-${Math.round(val * 3)} ק"מ`
+  );
+
+  if (val <= 15) {
+    setBatteryStatusText(
+      `מצב חירום — סוללה קריטית (${val}%)`
+    );
+
+    setBatteryColor('var(--ev-danger)');
+
+  } else if (val <= 50) {
+
+    setBatteryStatusText(
+      `סוללה במצב בינוני (${val}%)`
+    );
+
+    setBatteryColor('var(--ev-warning)');
+
+  } else {
+
+    setBatteryStatusText(
+      `סוללה תקינה (${val}%)`
+    );
+
+    setBatteryColor('var(--ev-brand)');
+  }
+}
+
+const handleBatteryChange = (
+  e: ChangeEvent<HTMLInputElement>
+) => {
+  updateBattery(Number(e.target.value));
+};
+
+function handleVehicleSelect(
+  vehicle: Vehicle | null
+) {
+  setVehicle(vehicle);
+
+  dispatch(
+    setSelectedVehicle(vehicle?.id ?? null)
+  );
+
+  if (vehicle) {
+
+    updateBattery(vehicle.currentBattery);
+
+    setChargerType(
+      vehicle.supportedChargerType
+    );
+
+    setTargetBattery(
+      Math.min(
+        100,
+        Math.max(80, vehicle.currentBattery + 10)
+      )
+    );
+
+    setErrorMessage('');
+
+  } else {
+    setChargerType('');
+  }
+}
   function handleDetectLocation() {
     setErrorMessage('');
     setSuggestions([]);
@@ -278,10 +339,38 @@ export default function DriverSearchScreen() {
   }
 
   async function runRecommendation(overrideBattery?: number) {
+    if (!selectedVehicle) {
+  setErrorMessage('יש לבחור רכב לפני חיפוש מותאם.');
+  return;
+}
+
+const requestedBattery =
+  overrideBattery ?? batteryLevel;
+
+if (
+  !Number.isFinite(requestedBattery) ||
+  requestedBattery < 0 ||
+  requestedBattery >= 100
+) {
+  setErrorMessage(
+    'יש להזין מצב סוללה תקין הנמוך מ-100%.'
+  );
+  return;
+}
+
+if (
+  targetBattery <= requestedBattery ||
+  targetBattery > 100
+) {
+  setErrorMessage(
+    'יעד הטעינה חייב להיות גבוה ממצב הסוללה הנוכחי.'
+  );
+  return;
+}
     setErrorMessage('');
     setSuggestions([]);
     const actualBattery = overrideBattery ?? batteryLevel;
-    const safeTarget = Math.max(targetBattery, Math.min(actualBattery + 10, 100));
+    const safeTarget = targetBattery;
     dispatch(setSearchBattery({ currentBatteryPercent: actualBattery, targetBatteryPercent: safeTarget }));
 
     try {
@@ -364,6 +453,11 @@ export default function DriverSearchScreen() {
         {errorMessage && <div className="ev-alert-error">{errorMessage}</div>}
 
         <form onSubmit={handleSubmit}>
+          <VehicleSelector
+  selectedId={selectedVehicle?.id ?? null}
+  onSelect={handleVehicleSelect}
+  disabled={isBusy}
+/>
           <div className="form-group" style={{ position: 'relative' }}>
             <label>מיקום נוכחי או כתובת יעד</label>
             <div style={{ display: 'flex', gap: '8px' }}>

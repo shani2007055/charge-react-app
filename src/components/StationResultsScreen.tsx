@@ -10,12 +10,9 @@ import StationMetrics from './ui/StationMetrics';
 import StationNavigation from './ui/StationNavigation';
 import { MapPin } from 'lucide-react';
 import './ui/DriverDashboard.css';
+import type { Vehicle } from '../types/Vehicle';
 
-interface VehicleDto {
-  id: number;
-  model: string;
-  currentBattery: number;
-}
+
 
 interface BookingStatusOnly {
   status: string;
@@ -65,10 +62,10 @@ export default function StationResultsScreen() {
     currentBatteryPercent,
     targetBatteryPercent,
     driverLocation,
+    selectedVehicleId,
     loading,
     error,
   } = useAppSelector((state) => state.stations);
-  const { carModel } = useAppSelector((state) => state.user);
 
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [hasActiveBooking, setHasActiveBooking] = useState<boolean>(false);
@@ -98,23 +95,46 @@ export default function StationResultsScreen() {
       setReservingId(station.id);
 
       try {
-        let vehicles = await apiFetch<VehicleDto[]>('/UsersVehicles/my');
-        if (vehicles.length === 0) {
-          const createdVehicle = await apiFetch<VehicleDto>('/UsersVehicles', {
-            method: 'POST',
-            body: JSON.stringify({
-              model: carModel || 'Tesla Model 3',
-              batteryCapacityKwh: 75,
-              currentBattery: currentBatteryPercent,
-              supportedChargerType: station.chargerType || 'CCS',
-            }),
-          });
-          vehicles = [createdVehicle];
-        }
+       const vehicles = await apiFetch<Vehicle[]>(
+  '/UsersVehicles/my'
+);
 
-        const vehicle = vehicles[0];
-        const currentBattery = Math.min(currentBatteryPercent, 95);
-        const targetBattery = Math.max(targetBatteryPercent, currentBattery + 1);
+const vehicle = vehicles.find(
+  v => v.id === selectedVehicleId
+);
+
+if (!vehicle) {
+  throw new Error(
+    'יש לחזור למסך החיפוש ולבחור רכב רשום לפני השריון.'
+  );
+}
+
+if (!station.isActive) {
+  throw new Error('העמדה אינה פעילה כרגע.');
+}
+
+if (
+  vehicle.supportedChargerType.trim().toLowerCase() !==
+  station.chargerType.trim().toLowerCase()
+) {
+  throw new Error(
+    'סוג מחבר העמדה אינו תואם למחבר הרכב הנבחר.'
+  );
+}
+
+const currentBattery = currentBatteryPercent;
+const targetBattery = targetBatteryPercent;
+
+if (
+  !Number.isFinite(currentBattery) ||
+  !Number.isFinite(targetBattery) ||
+  currentBattery < 0 ||
+  currentBattery >= 100 ||
+  targetBattery <= currentBattery ||
+  targetBattery > 100
+) {
+  throw new Error('נתוני הסוללה אינם תקינים.');
+}
 
         const distanceKm =
           typeof explicitDistanceKm === 'number'
@@ -157,8 +177,13 @@ export default function StationResultsScreen() {
         setReservingId(null);
       }
     },
-    [carModel, currentBatteryPercent, targetBatteryPercent, driverLocation, navigate]
-  );
+[
+  selectedVehicleId,
+  currentBatteryPercent,
+  targetBatteryPercent,
+  driverLocation,
+  navigate
+]  );
 
   const matchesQuickFilter = useCallback(
     (station: Station) => {

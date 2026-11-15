@@ -1,6 +1,6 @@
 
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 
 import {
   Mail,
@@ -127,7 +127,7 @@ export default function LoginScreen() {
     useState<string | null>(null);
 
   const dispatch = useAppDispatch();
-  const navigate = useNavigate();
+ 
 
   const { loading, sessionExpiredMessage } =
     useAppSelector(state => state.user);
@@ -226,8 +226,7 @@ export default function LoginScreen() {
         })).unwrap();
       }
 
-      // App.tsx מזהה את ההרשאה ומנווט למסך המתאים
-      navigate('/login', { replace: true });
+      
 
     } catch (error) {
       setErrorMessage(getErrorMessage(error));

@@ -28,6 +28,7 @@ export interface DriverCoords {
 }
 
 export interface StationsState {
+  selectedVehicleId: number | null;
   items: Station[];
   recommendations: RankedStationResult[];
   hasSearched: boolean;
@@ -39,6 +40,7 @@ export interface StationsState {
 }
 
 export const initialState: StationsState = {
+  selectedVehicleId: null,
   items: [],
   recommendations: [],
   hasSearched: false,
