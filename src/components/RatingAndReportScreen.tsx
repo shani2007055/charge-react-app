@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { useAppDispatch } from '../store/hooks';
 import { addCommunityPoints } from '../store/user/userSlice';
 import { apiFetch } from '../api/apiClient';
+import PageHeader from './ui/PageHeader';
+import { Star } from 'lucide-react';
+import './ui/DriverDashboard.css';
 
 interface CompletedBooking {
   id: number;
@@ -206,18 +209,19 @@ export default function RatingAndReportScreen() {
   }
 
   return (
-    <div className="container" dir="rtl">
-      <div className="ev-card" style={{ maxWidth: '640px', margin: '0 auto', padding: '28px' }}>
-        <div className="screen-header">
-          <div>
-            <div>סיכום טעינה, דירוג ודיווח תקלות</div>
-            <p className="ev-subtitle">
-              {booking
-                ? `${booking.stationName} · הזמנה #${booking.bookingId}`
-                : 'לא נמצאה טעינה שהסתיימה וממתינה לדירוג'}
-            </p>
-          </div>
-        </div>
+  <div className="dash-page" dir="rtl">
+
+    <PageHeader
+      title="סיכום הטעינה"
+      description={
+        booking
+          ? `${booking.stationName} · הזמנה #${booking.bookingId}`
+          : 'לא נמצאה טעינה הממתינה לדירוג'
+      }
+      icon={Star}
+    />
+
+    <div className="ev-card driver-rating-content">
 
         {!booking && (
           <div

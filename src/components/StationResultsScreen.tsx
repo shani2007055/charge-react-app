@@ -5,6 +5,11 @@ import { fetchStations } from '../store/stations/stationsThunks';
 import { apiFetch } from '../api/apiClient';
 import type { Station } from '../store/stations/stationsState';
 import StationsMap, { type MapStationItem } from './StationsMap';
+import PageHeader from './ui/PageHeader';
+import StationMetrics from './ui/StationMetrics';
+import StationNavigation from './ui/StationNavigation';
+import { MapPin } from 'lucide-react';
+import './ui/DriverDashboard.css';
 
 interface VehicleDto {
   id: number;
@@ -229,7 +234,17 @@ export default function StationResultsScreen() {
   const displayedCount = hasSearched ? filteredRecommendations.length : filteredItems.length;
 
   return (
-    <div className="container" dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+    <div className="dash-page" dir="rtl">
+
+  <PageHeader
+    title="עמדות טעינה"
+    description={
+      hasSearched
+        ? 'עמדות טעינה המותאמות לנתוני החיפוש שלך'
+        : 'גלו את עמדות הטעינה הזמינות במערכת'
+    }
+    icon={MapPin}
+  />
       {/* סרגל פעולות ופילטרים מהירים */}
       <div
         className="ev-card"
@@ -350,18 +365,15 @@ export default function StationResultsScreen() {
 
       {/* פריסת Split-View: רשימת עמדות + מפה בהירה */}
       <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns:
-            showMap && mapStations.length > 0
-              ? 'repeat(auto-fit, minmax(340px, 1fr))'
-              : 'minmax(0, 1fr)',
-          gap: '20px',
-          alignItems: 'start',
-        }}
-      >
+  className={`results-grid ${
+    showMap && mapStations.length > 0
+      ? 'has-map'
+      : ''
+  }`}
+>
+      
         {/* רשימת עמדות */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div className="results-list">
           {hasSearched ? (
             filteredRecommendations.length === 0 ? (
               <div className="ev-card" style={{ textAlign: 'center', padding: '32px' }}>
@@ -384,8 +396,8 @@ export default function StationResultsScreen() {
                 return (
                   <div
                     key={rec.station.id}
-                    className="ev-card"
-                    style={{
+                    className="ev-card station-result-card"    
+                style={{
                       padding: '18px 20px',
                       borderColor: rec.isEmergencyMode ? 'var(--ev-danger-border)' : undefined,
                       background: rec.isEmergencyMode ? 'var(--ev-danger-soft)' : undefined,
@@ -453,7 +465,12 @@ export default function StationResultsScreen() {
                     >
                       {rec.matchReason}
                     </p>
+                     <StationMetrics station={rec.station} />
 
+<StationNavigation
+  latitude={rec.station.latitude}
+  longitude={rec.station.longitude}
+/>
                     <div
                       style={{
                         marginTop: '14px',
@@ -520,8 +537,11 @@ export default function StationResultsScreen() {
               const eta = estimateReservationWindow(distKm);
 
               return (
-                <div key={station.id} className="ev-card" style={{ padding: '18px 20px' }}>
-                  <div
+               <div
+                 key={station.id}
+                  className="ev-card station-result-card"
+                   > 
+                 <div
                     style={{
                       display: 'flex',
                       justifyContent: 'space-between',
@@ -559,7 +579,12 @@ export default function StationResultsScreen() {
                       {station.currentStatus ?? (station.isActive ? 'זמינה' : 'לא פעילה')}
                     </span>
                   </div>
+                     <StationMetrics station={station} />
 
+<StationNavigation
+  latitude={station.latitude}
+  longitude={station.longitude}
+/>
                   <div
                     style={{
                       marginTop: '14px',
@@ -602,8 +627,8 @@ export default function StationResultsScreen() {
 
         {/* מפה בהירה */}
         {showMap && mapStations.length > 0 && (
-          <div className="ev-card" style={{ padding: '8px', position: 'sticky', top: '84px' }}>
-            <StationsMap
+        <div className="ev-card results-map-panel">
+              <StationsMap
               stations={mapStations}
               driverLocation={driverLocation}
               hasActiveBooking={hasActiveBooking}
