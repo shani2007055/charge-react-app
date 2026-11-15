@@ -172,3 +172,24 @@
     transition: none;
   }
 }
+@media (max-width: 600px) {
+  .results-grid {
+    gap: 16px;
+  }
+
+  .dash-page .results-map-panel {
+    padding: 6px;
+  }
+
+  .dash-page .results-map-panel .ev-map-canvas {
+    height: 260px;
+  }
+
+  .station-navigation {
+    gap: 8px;
+  }
+
+  .station-nav-link {
+    flex: 1 1 130px;
+  }
+}

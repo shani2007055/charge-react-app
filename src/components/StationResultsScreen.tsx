@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { MapPin } from 'lucide-react';
 import { apiFetch } from '../api/apiClient';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { setSelectedVehicle } from '../store/stations/stationsSlice';
 import type { Station } from '../store/stations/stationsState';
 import { fetchStations } from '../store/stations/stationsThunks';
 import type { Vehicle } from '../types/Vehicle';
@@ -95,10 +96,29 @@ export default function StationResultsScreen() {
 
       try {
         const vehicles = await apiFetch<Vehicle[]>('/UsersVehicles/my');
-        const vehicle = vehicles.find((v) => v.id === selectedVehicleId);
+        let vehicle = vehicles.find((v) => v.id === selectedVehicleId);
+
+        if (!vehicle && selectedVehicleId === null) {
+          const compatible = vehicles.filter(
+            (v) =>
+              v.supportedChargerType.trim().toLowerCase() ===
+              station.chargerType.trim().toLowerCase()
+          );
+          if (compatible.length === 1) {
+            vehicle = compatible[0];
+            dispatch(setSelectedVehicle(vehicle.id));
+          } else if (vehicles.length === 1) {
+            vehicle = vehicles[0];
+            dispatch(setSelectedVehicle(vehicle.id));
+          }
+        }
 
         if (!vehicle) {
-          throw new Error('יש לחזור למסך החיפוש ולבחור רכב רשום לפני השריון.');
+          throw new Error(
+            vehicles.length === 0
+              ? 'לא נמצא רכב רשום. יש להוסיף רכב בפרופיל האישי לפני השריון.'
+              : 'יש לבחור רכב במסך החיפוש או במסך פרטי התחנה לפני השריון.'
+          );
         }
 
         if (!station.isActive) {
@@ -166,7 +186,14 @@ export default function StationResultsScreen() {
         setReservingId(null);
       }
     },
-    [selectedVehicleId, currentBatteryPercent, targetBatteryPercent, driverLocation, navigate]
+    [
+      selectedVehicleId,
+      currentBatteryPercent,
+      targetBatteryPercent,
+      driverLocation,
+      dispatch,
+      navigate,
+    ]
   );
 
   const matchesQuickFilter = useCallback(
@@ -216,7 +243,10 @@ export default function StationResultsScreen() {
       return {
         station,
         distanceKm,
-        etaMinutes: estimateReservationWindow(distanceKm ?? null).totalMinutes,
+        etaMinutes:
+          distanceKm !== undefined
+            ? estimateReservationWindow(distanceKm).totalMinutes
+            : undefined,
       };
     });
   }, [hasSearched, filteredRecommendations, filteredItems, driverLocation]);
@@ -510,6 +540,13 @@ export default function StationResultsScreen() {
                         <button
                           type="button"
                           className="ev-btn ev-btn-secondary ev-btn-auto"
+                          onClick={() => navigate(`/stations/${rec.station.id}`)}
+                        >
+                          פרטי תחנה
+                        </button>
+                        <button
+                          type="button"
+                          className="ev-btn ev-btn-secondary ev-btn-auto"
                           onClick={() => handleFocusOnMap(rec.station.id)}
                         >
                           הצג במפה
@@ -639,6 +676,13 @@ export default function StationResultsScreen() {
                       <button
                         type="button"
                         className="ev-btn ev-btn-secondary ev-btn-auto"
+                        onClick={() => navigate(`/stations/${station.id}`)}
+                      >
+                        פרטי תחנה
+                      </button>
+                      <button
+                        type="button"
+                        className="ev-btn ev-btn-secondary ev-btn-auto"
                         onClick={() => handleFocusOnMap(station.id)}
                       >
                         הצג במפה
@@ -673,6 +717,7 @@ export default function StationResultsScreen() {
               reservingId={reservingId}
               selectedStationId={selectedStationId}
               onReserve={(station, distanceKm) => void handleReserveStation(station, distanceKm)}
+              onOpenDetails={(station) => navigate(`/stations/${station.id}`)}
             />
           </div>
         )}

@@ -1,9 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { BatteryCharging } from 'lucide-react';
 import { apiFetch } from '../api/apiClient';
+import type { Station } from '../store/stations/stationsState';
+import type { Vehicle } from '../types/Vehicle';
 import PageHeader from './ui/PageHeader';
 import StatusBadge from './ui/StatusBadge';
-import { BatteryCharging } from 'lucide-react';
 import './ui/DriverDashboard.css';
 
 interface ChargeBooking {
@@ -11,6 +13,7 @@ interface ChargeBooking {
   stationId: number;
   stationName: string;
   stationAddress: string;
+  vehicleId: number;
   vehicleModel: string;
   status: 'Held' | 'Confirmed' | 'Charging' | 'Completed' | 'Cancelled' | 'Expired';
   currentBatteryPercent: number;
@@ -18,7 +21,10 @@ interface ChargeBooking {
   estimatedArrivalTime?: string;
   holdExpiresAt?: string;
   createdAt: string;
+  hasReview?: boolean;
 }
+
+type HistoryFilter = 'all' | 'completed' | 'inactive';
 
 const ACTIVE_STATUSES = ['Held', 'Confirmed', 'Charging'];
 
@@ -41,48 +47,112 @@ function parseSafeArrivalDate(estimatedArrivalTime: string, createdAt: string): 
   return new Date(etaMs);
 }
 
+function getHoldExpirationMs(item: ChargeBooking): number {
+  if (item.holdExpiresAt) {
+    const parsed = new Date(item.holdExpiresAt).getTime();
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  const createdMs = new Date(item.createdAt).getTime();
+  return (Number.isNaN(createdMs) ? Date.now() : createdMs) + 15 * 60 * 1000;
+}
+
+function formatHebrewDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('he-IL', {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(date);
+}
+
 export default function ActiveSessionScreen() {
   const [booking, setBooking] = useState<ChargeBooking | null>(null);
+  const [historyBookings, setHistoryBookings] = useState<ChargeBooking[]>([]);
+  const [stationsById, setStationsById] = useState<Record<number, Station>>({});
+  const [vehiclesById, setVehiclesById] = useState<Record<number, Vehicle>>({});
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all');
+
   const [secondsLeft, setSecondsLeft] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [updating, setUpdating] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
-  async function loadActiveBooking() {
+  const loadBookingsData = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
-      const myBookings = await apiFetch<ChargeBooking[]>('/ChargeBooking/my');
+
+      const [bookingsRes, stationsRes, vehiclesRes] = await Promise.allSettled([
+        apiFetch<ChargeBooking[]>('/ChargeBooking/my'),
+        apiFetch<Station[]>('/ChargingStations'),
+        apiFetch<Vehicle[]>('/UsersVehicles/my'),
+      ]);
+
+      if (bookingsRes.status === 'rejected') {
+        const msg =
+          bookingsRes.reason instanceof Error
+            ? bookingsRes.reason.message
+            : 'שגיאה בטעינת ההזמנות';
+        setError(msg);
+        return;
+      }
+
+      const myBookings = bookingsRes.value;
       const active = myBookings.find((b) => ACTIVE_STATUSES.includes(b.status)) ?? null;
+      const history = myBookings
+        .filter((b) => !ACTIVE_STATUSES.includes(b.status))
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
       setBooking(active);
-      if (active) {
-        const expiresAtMs = active.holdExpiresAt
-          ? new Date(active.holdExpiresAt).getTime()
-          : new Date(active.createdAt).getTime() + 15 * 60 * 1000;
-        const remainingSec = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
-        setSecondsLeft(remainingSec);
+      setHistoryBookings(history);
+
+      if (active && active.status === 'Held') {
+        const expiresAtMs = getHoldExpirationMs(active);
+        setSecondsLeft(Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000)));
+      } else {
+        setSecondsLeft(0);
+      }
+
+      if (stationsRes.status === 'fulfilled') {
+        const map: Record<number, Station> = {};
+        for (const s of stationsRes.value) {
+          map[s.id] = s;
+        }
+        setStationsById(map);
+      }
+
+      if (vehiclesRes.status === 'fulfilled') {
+        const map: Record<number, Vehicle> = {};
+        for (const v of vehiclesRes.value) {
+          map[v.id] = v;
+        }
+        setVehiclesById(map);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בטעינת השריון הפעיל');
     } finally {
       setLoading(false);
     }
-  }
-
-  useEffect(() => {
-    loadActiveBooking();
   }, []);
 
-  // טיימר ספירה לאחור עם Cleanup (רץ רק כשההזמנה בסטטוס Held)
+  useEffect(() => {
+    void loadBookingsData();
+  }, [loadBookingsData]);
+
+  // טיימר ספירה לאחור מסונכרן לשעון אמיתי (רץ רק כשההזמנה בסטטוס Held)
   useEffect(() => {
     if (!booking || booking.status !== 'Held') return;
 
-    const timerId = setInterval(() => {
-      setSecondsLeft((prev) => (prev <= 1 ? 0 : prev - 1));
-    }, 1000);
+    const expiresAtMs = getHoldExpirationMs(booking);
+    const updateRemaining = () => {
+      setSecondsLeft(Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000)));
+    };
 
-    return () => clearInterval(timerId);
+    updateRemaining();
+    const timerId = window.setInterval(updateRemaining, 1000);
+
+    return () => window.clearInterval(timerId);
   }, [booking]);
 
   async function changeStatus(newStatus: 'Confirmed' | 'Charging' | 'Completed' | 'Cancelled') {
@@ -109,7 +179,7 @@ export default function ActiveSessionScreen() {
       }
 
       if (newStatus === 'Cancelled') {
-        setBooking(null);
+        await loadBookingsData();
         return;
       }
 
@@ -120,6 +190,79 @@ export default function ActiveSessionScreen() {
       setUpdating(false);
     }
   }
+
+  function estimateBookingEnergyAndCost(item: ChargeBooking): {
+    kwh: number;
+    minutes: number | null;
+    cost: number | null;
+  } {
+    const addedPercent = Math.max(0, item.targetBatteryPercent - item.currentBatteryPercent);
+    const vehicle = vehiclesById[item.vehicleId];
+    const station = stationsById[item.stationId];
+    const capacityKwh = vehicle?.batteryCapacityKwh ?? 60;
+    const kwh = Math.round(((addedPercent / 100) * capacityKwh) * 10) / 10;
+    const minutes =
+      station && station.maxKw > 0
+        ? Math.max(1, Math.round((kwh / station.maxKw) * 60))
+        : null;
+    const cost = station ? Math.round(kwh * station.pricePerKwh * 100) / 100 : null;
+    return { kwh, minutes, cost };
+  }
+
+  function handleRateFromHistory(item: ChargeBooking) {
+    localStorage.setItem(
+      'lastCompletedBooking',
+      JSON.stringify({
+        bookingId: item.id,
+        stationId: item.stationId,
+        stationName: item.stationName,
+      })
+    );
+    navigate('/rating');
+  }
+
+  const activeEstimate = useMemo(
+    () => (booking ? estimateBookingEnergyAndCost(booking) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [booking, stationsById, vehiclesById]
+  );
+
+  const filteredHistory = useMemo(() => {
+    if (historyFilter === 'completed') {
+      return historyBookings.filter((b) => b.status === 'Completed');
+    }
+    if (historyFilter === 'inactive') {
+      return historyBookings.filter((b) => b.status === 'Cancelled' || b.status === 'Expired');
+    }
+    return historyBookings;
+  }, [historyBookings, historyFilter]);
+
+  const historySummary = useMemo(() => {
+    const completed = historyBookings.filter((b) => b.status === 'Completed');
+    let totalKwh = 0;
+    let totalCost = 0;
+    let hasCostData = false;
+
+    for (const item of completed) {
+      const addedPercent = Math.max(0, item.targetBatteryPercent - item.currentBatteryPercent);
+      const vehicle = vehiclesById[item.vehicleId];
+      const station = stationsById[item.stationId];
+      const capacityKwh = vehicle?.batteryCapacityKwh ?? 60;
+      const kwh = (addedPercent / 100) * capacityKwh;
+      totalKwh += kwh;
+      if (station) {
+        totalCost += kwh * station.pricePerKwh;
+        hasCostData = true;
+      }
+    }
+
+    return {
+      totalCount: historyBookings.length,
+      completedCount: completed.length,
+      totalKwh: Math.round(totalKwh * 10) / 10,
+      totalCost: hasCostData ? totalCost.toFixed(2) : null,
+    };
+  }, [historyBookings, stationsById, vehiclesById]);
 
   const minutes = Math.floor(secondsLeft / 60);
   const seconds = secondsLeft % 60;
@@ -135,10 +278,10 @@ export default function ActiveSessionScreen() {
 
   if (loading) {
     return (
-      <div className="container" dir="rtl">
-        <div className="ev-card" style={{ textAlign: 'center', padding: '48px 24px' }}>
+      <div className="dash-page" dir="rtl">
+        <div className="ev-card driver-session-content" style={{ textAlign: 'center', padding: '48px 24px' }}>
           <p style={{ margin: 0, color: 'var(--ev-ink-muted)', fontWeight: 500 }}>
-            טוען פרטי שריון פעיל...
+            טוען פרטי שריון והיסטוריית טעינות...
           </p>
         </div>
       </div>
@@ -150,34 +293,30 @@ export default function ActiveSessionScreen() {
     : -1;
 
   return (
-  <div className="dash-page" dir="rtl">
+    <div className="dash-page" dir="rtl">
+      <PageHeader
+        title="הטעינה שלי"
+        description="מעקב אחר השריון הפעיל והיסטוריית ההזמנות והטעינות"
+        icon={BatteryCharging}
+        actions={
+          booking && (
+            <>
+              <span className="ev-badge ev-badge-brand">הזמנה #{booking.id}</span>
+              <StatusBadge status={booking.status} />
+            </>
+          )
+        }
+      />
 
-    <PageHeader
-      title="הטעינה שלי"
-      description="מעקב אחר השריון, ההגעה ומצב הטעינה"
-      icon={BatteryCharging}
-      actions={
-        booking && (
-          <>
-            <span className="ev-badge ev-badge-brand">
-              הזמנה #{booking.id}
-            </span>
-
-            <StatusBadge status={booking.status} />
-          </>
-        )
-      }
-    />
-
-    <div className="ev-card driver-session-content">
-
+      {/* כרטיס שריון / טעינה פעילה */}
+      <div className="ev-card driver-session-content">
         {error && <div className="ev-alert-error">{error}</div>}
 
         {!booking ? (
           <div
             style={{
               textAlign: 'center',
-              padding: '36px 20px',
+              padding: '32px 20px',
               background: 'var(--ev-bg)',
               borderRadius: '12px',
               border: '1px solid var(--ev-border)',
@@ -224,6 +363,13 @@ export default function ActiveSessionScreen() {
                 <div className="font-mono-num" style={{ fontSize: '1rem', fontWeight: 700 }}>
                   {booking.currentBatteryPercent}% ← {booking.targetBatteryPercent}%
                 </div>
+                {activeEstimate && (
+                  <div className="tabular-nums" style={{ fontSize: '0.76rem', color: 'var(--ev-ink-muted)', marginTop: '3px' }}>
+                    ~{activeEstimate.kwh} kWh
+                    {activeEstimate.minutes !== null ? ` · ~${activeEstimate.minutes} דק׳ טעינה` : ''}
+                    {activeEstimate.cost !== null ? ` · ~₪${activeEstimate.cost.toFixed(2)}` : ''}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -288,9 +434,11 @@ export default function ActiveSessionScreen() {
                     marginBottom: '6px',
                   }}
                 >
-                  {isExpiringSoon
-                    ? 'השריון עומד לפוג בעוד פחות מ-3 דקות'
-                    : 'זמן שנותר להגעה ואישור בעמדה'}
+                  {secondsLeft === 0
+                    ? 'זמן השריון הסתיים — יש לרענן סטטוס'
+                    : isExpiringSoon
+                      ? 'השריון עומד לפוג בעוד פחות מ-3 דקות'
+                      : 'זמן שנותר להגעה ואישור בעמדה'}
                 </div>
                 <div
                   className="font-mono-num"
@@ -298,7 +446,7 @@ export default function ActiveSessionScreen() {
                     fontSize: '2.75rem',
                     fontWeight: 700,
                     lineHeight: 1.1,
-                    color: isExpiringSoon ? 'var(--ev-danger)' : 'var(--ev-ink)',
+                    color: isExpiringSoon || secondsLeft === 0 ? 'var(--ev-danger)' : 'var(--ev-ink)',
                   }}
                 >
                   {formattedTime}
@@ -315,6 +463,16 @@ export default function ActiveSessionScreen() {
                   >
                     הגעה מתוכננת (לפי מרחק ומרווח ביטחון): <strong>{formattedEta}</strong>
                   </div>
+                )}
+                {secondsLeft === 0 && (
+                  <button
+                    type="button"
+                    className="ev-btn ev-btn-secondary ev-btn-auto"
+                    style={{ marginTop: '12px' }}
+                    onClick={() => void loadBookingsData()}
+                  >
+                    רענן סטטוס הזמנה
+                  </button>
                 )}
               </div>
             )}
@@ -337,6 +495,9 @@ export default function ActiveSessionScreen() {
                 <div>
                   <div style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--ev-ink)' }}>
                     הטעינה מתבצעת כעת
+                    {activeEstimate?.minutes !== null && activeEstimate
+                      ? ` (זמן משוער: ~${activeEstimate.minutes} דק׳)`
+                      : ''}
                   </div>
                   <div style={{ fontSize: '0.82rem', color: 'var(--ev-ink-muted)', marginTop: '2px' }}>
                     בסיום הוצאת הכבל לחצי על כפתור הסיום כדי לעדכן את זמינות העמדה.
@@ -369,7 +530,7 @@ export default function ActiveSessionScreen() {
                     className="ev-btn"
                     style={{ flex: '1 1 180px' }}
                     disabled={updating}
-                    onClick={() => changeStatus('Confirmed')}
+                    onClick={() => void changeStatus('Confirmed')}
                   >
                     {updating ? 'מעדכן...' : 'הגעתי לעמדה (אשר הגעה)'}
                   </button>
@@ -382,7 +543,7 @@ export default function ActiveSessionScreen() {
                   className="ev-btn ev-btn-accent"
                   style={{ flex: '1 1 220px' }}
                   disabled={updating}
-                  onClick={() => changeStatus('Charging')}
+                  onClick={() => void changeStatus('Charging')}
                 >
                   {updating ? 'מתחיל טעינה...' : 'התחל טעינה'}
                 </button>
@@ -394,7 +555,7 @@ export default function ActiveSessionScreen() {
                   className="ev-btn"
                   style={{ flex: '1 1 220px' }}
                   disabled={updating}
-                  onClick={() => changeStatus('Completed')}
+                  onClick={() => void changeStatus('Completed')}
                 >
                   {updating ? 'מסיים...' : 'סיימתי טעינה — עבור לדירוג'}
                 </button>
@@ -405,7 +566,7 @@ export default function ActiveSessionScreen() {
                   type="button"
                   className="ev-btn ev-btn-danger ev-btn-auto"
                   disabled={updating}
-                  onClick={() => changeStatus('Cancelled')}
+                  onClick={() => void changeStatus('Cancelled')}
                 >
                   בטל שריון
                 </button>
@@ -414,6 +575,252 @@ export default function ActiveSessionScreen() {
           </div>
         )}
       </div>
+
+      {/* היסטוריית הזמנות וטעינות */}
+      <section className="ev-card driver-session-content" style={{ marginTop: '4px' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '12px',
+            marginBottom: '18px',
+          }}
+        >
+          <div>
+            <h2 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: 'var(--ev-ink)' }}>
+              היסטוריית הזמנות וטעינות
+            </h2>
+            <p style={{ margin: '4px 0 0 0', fontSize: '0.84rem', color: 'var(--ev-ink-muted)' }}>
+              מעקב אחר כל הטעינות שהושלמו, הזמנות שבוטלו ודירוגים פתוחים
+            </p>
+          </div>
+
+          <div className="auth-toggle" style={{ marginBottom: 0 }}>
+            {(
+              [
+                { id: 'all', label: `הכול (${historyBookings.length})` },
+                { id: 'completed', label: `הושלמו (${historySummary.completedCount})` },
+                { id: 'inactive', label: 'בוטלו / פג תוקף' },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={`auth-toggle-btn ${historyFilter === tab.id ? 'active' : ''}`}
+                style={{ padding: '6px 12px', fontSize: '0.8rem' }}
+                onClick={() => setHistoryFilter(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* כרטיסי סיכום */}
+        {historyBookings.length > 0 && (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+              gap: '10px',
+              marginBottom: '18px',
+            }}
+          >
+            <div
+              style={{
+                padding: '12px 14px',
+                borderRadius: '12px',
+                background: '#F8FAFC',
+                border: '1px solid var(--ev-border)',
+              }}
+            >
+              <div style={{ fontSize: '0.76rem', color: 'var(--ev-ink-soft)' }}>סה״כ הזמנות עבר</div>
+              <strong className="tabular-nums" style={{ fontSize: '1.15rem', color: 'var(--ev-ink)' }}>
+                {historySummary.totalCount}
+              </strong>
+            </div>
+
+            <div
+              style={{
+                padding: '12px 14px',
+                borderRadius: '12px',
+                background: '#F8FAFC',
+                border: '1px solid var(--ev-border)',
+              }}
+            >
+              <div style={{ fontSize: '0.76rem', color: 'var(--ev-ink-soft)' }}>טעינות שהושלמו</div>
+              <strong className="tabular-nums" style={{ fontSize: '1.15rem', color: 'var(--ev-brand)' }}>
+                {historySummary.completedCount}
+              </strong>
+            </div>
+
+            <div
+              style={{
+                padding: '12px 14px',
+                borderRadius: '12px',
+                background: '#F8FAFC',
+                border: '1px solid var(--ev-border)',
+              }}
+            >
+              <div style={{ fontSize: '0.76rem', color: 'var(--ev-ink-soft)' }}>
+                אנרגיה ועלות מצטברת (אומדן)
+              </div>
+              <strong className="tabular-nums" style={{ fontSize: '1.05rem', color: 'var(--ev-ink)' }}>
+                {historySummary.totalKwh} kWh
+                {historySummary.totalCost !== null ? ` · ₪${historySummary.totalCost}` : ''}
+              </strong>
+            </div>
+          </div>
+        )}
+
+        {filteredHistory.length === 0 ? (
+          <div
+            style={{
+              textAlign: 'center',
+              padding: '28px 16px',
+              borderRadius: '12px',
+              background: '#F8FAFC',
+              border: '1px solid var(--ev-border)',
+              color: 'var(--ev-ink-muted)',
+              fontSize: '0.88rem',
+            }}
+          >
+            {historyBookings.length === 0
+              ? 'עדיין אין הזמנות קודמות בהיסטוריה שלך.'
+              : 'אין הזמנות התואמות לסינון שנבחר.'}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {filteredHistory.map((item) => {
+              const est = estimateBookingEnergyAndCost(item);
+              const isCompleted = item.status === 'Completed';
+              return (
+                <article
+                  key={item.id}
+                  style={{
+                    padding: '16px',
+                    borderRadius: '14px',
+                    background: '#F8FAFC',
+                    border: '1px solid var(--ev-border)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      flexWrap: 'wrap',
+                      gap: '10px',
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--ev-ink)' }}>
+                          {item.stationName}
+                        </h3>
+                        <span className="tabular-nums" style={{ fontSize: '0.76rem', color: 'var(--ev-ink-soft)' }}>
+                          #{item.id}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.82rem', color: 'var(--ev-ink-muted)', marginTop: '3px' }}>
+                        {item.stationAddress}
+                        {item.vehicleModel ? ` · ${item.vehicleModel}` : ''}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                      <StatusBadge status={item.status} />
+                      <span className="tabular-nums" style={{ fontSize: '0.78rem', color: 'var(--ev-ink-soft)' }}>
+                        {formatHebrewDateTime(item.createdAt)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: '10px',
+                      paddingTop: '10px',
+                      borderTop: '1px solid var(--ev-border)',
+                    }}
+                  >
+                    <div
+                      className="tabular-nums"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '14px',
+                        flexWrap: 'wrap',
+                        fontSize: '0.84rem',
+                        color: 'var(--ev-ink-muted)',
+                      }}
+                    >
+                      <span>
+                        סוללה:{' '}
+                        <strong className="font-mono-num" style={{ color: 'var(--ev-ink)' }}>
+                          {item.currentBatteryPercent}% ← {item.targetBatteryPercent}%
+                        </strong>
+                      </span>
+                      {isCompleted && (
+                        <span>
+                          אנרגיה ועלות משוערת:{' '}
+                          <strong style={{ color: 'var(--ev-ink)' }}>
+                            ~{est.kwh} kWh
+                            {est.cost !== null ? ` · ~₪${est.cost.toFixed(2)}` : ''}
+                          </strong>
+                        </span>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      {isCompleted && !item.hasReview && (
+                        <button
+                          type="button"
+                          className="ev-btn ev-btn-auto"
+                          style={{ padding: '7px 14px', fontSize: '0.82rem' }}
+                          onClick={() => handleRateFromHistory(item)}
+                        >
+                          דרג תחנה
+                        </button>
+                      )}
+                      {isCompleted && item.hasReview && (
+                        <span
+                          style={{
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                            color: '#15803d',
+                            background: '#dcfce7',
+                            padding: '5px 10px',
+                            borderRadius: '8px',
+                          }}
+                        >
+                          דורגה ✓
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        className="ev-btn ev-btn-secondary ev-btn-auto"
+                        style={{ padding: '7px 14px', fontSize: '0.82rem' }}
+                        onClick={() => navigate(`/stations/${item.stationId}`)}
+                      >
+                        פרטי תחנה
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

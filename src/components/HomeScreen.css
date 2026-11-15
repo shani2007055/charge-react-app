@@ -378,3 +378,39 @@
     font-size: 12px;
   }
 }
+@media (max-width: 650px) {
+  .home-page {
+    border-radius: 18px;
+  }
+
+  .home-hero-content {
+    padding: 26px 18px;
+  }
+
+  .home-hero h1 {
+    font-size: clamp(28px, 8.2vw, 40px);
+    margin: 16px 0;
+  }
+
+  .home-hero p {
+    font-size: 15px;
+    line-height: 1.65;
+    margin: 0 0 22px;
+  }
+
+  .home-primary,
+  .home-ai-button {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .home-hero-image {
+    min-height: 210px;
+  }
+
+  .home-features {
+    padding: 14px 10px;
+    gap: 10px;
+  }
+}

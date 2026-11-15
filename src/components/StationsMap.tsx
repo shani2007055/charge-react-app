@@ -17,6 +17,7 @@ interface StationsMapProps {
   reservingId: number | null;
   selectedStationId?: number | null;
   onReserve: (station: Station, distanceKm?: number) => void;
+  onOpenDetails?: (station: Station) => void;
 }
 
 const DEFAULT_CENTER: L.LatLngTuple = [32.0853, 34.7818];
@@ -75,6 +76,7 @@ export default function StationsMap({
   reservingId,
   selectedStationId = null,
   onReserve,
+  onOpenDetails,
 }: StationsMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -82,10 +84,15 @@ export default function StationsMap({
   const markersByIdRef = useRef<Map<number, L.Marker>>(new Map());
   const lastBoundsKeyRef = useRef<string>('');
   const onReserveRef = useRef(onReserve);
+  const onOpenDetailsRef = useRef(onOpenDetails);
 
   useEffect(() => {
     onReserveRef.current = onReserve;
   }, [onReserve]);
+
+  useEffect(() => {
+    onOpenDetailsRef.current = onOpenDetails;
+  }, [onOpenDetails]);
 
   const computeBoundsPoints = useCallback((): L.LatLngTuple[] => {
     const points: L.LatLngTuple[] = [];
@@ -258,7 +265,10 @@ export default function StationsMap({
       if (!isFaulty) {
         const reserveBtn = document.createElement('button');
         reserveBtn.type = 'button';
-        const windowText = etaMinutes !== undefined ? `הגעה ~${etaMinutes} דק׳` : 'שריון דינמי';
+        const windowText =
+          distanceKm !== undefined && etaMinutes !== undefined
+            ? `הגעה ~${etaMinutes} דק׳`
+            : 'שמירה אוטומטית';
         reserveBtn.textContent =
           reservingId === station.id
             ? 'משריין...'
@@ -278,6 +288,25 @@ export default function StationsMap({
         reserveBtn.style.cursor = hasActiveBooking ? 'not-allowed' : 'pointer';
         reserveBtn.addEventListener('click', () => onReserveRef.current(station, distanceKm));
         popupContainer.appendChild(reserveBtn);
+      }
+
+      if (onOpenDetailsRef.current) {
+        const detailsBtn = document.createElement('button');
+        detailsBtn.type = 'button';
+        detailsBtn.textContent = 'פרטי תחנה וביקורות';
+        detailsBtn.style.width = '100%';
+        detailsBtn.style.marginTop = '6px';
+        detailsBtn.style.padding = '7px 12px';
+        detailsBtn.style.border = '1px solid #CBD5E1';
+        detailsBtn.style.borderRadius = '8px';
+        detailsBtn.style.background = '#FFFFFF';
+        detailsBtn.style.color = '#0F172A';
+        detailsBtn.style.fontWeight = '600';
+        detailsBtn.style.fontSize = '12px';
+        detailsBtn.style.fontFamily = 'Heebo, system-ui, sans-serif';
+        detailsBtn.style.cursor = 'pointer';
+        detailsBtn.addEventListener('click', () => onOpenDetailsRef.current?.(station));
+        popupContainer.appendChild(detailsBtn);
       }
 
       const marker = L.marker([lat, lng], {

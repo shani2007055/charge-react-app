@@ -19,6 +19,8 @@ interface RecommendedAction {
 interface VehicleDto {
   id: number;
   model: string;
+  supportedChargerType?: string;
+  currentBattery?: number;
 }
 
 interface NominatimReverseResponse {
@@ -83,12 +85,37 @@ const QUICK_PROMPTS = [
   'אני יושב לפגישה של שעתיים בתל אביב, מה מומלץ?',
 ];
 
+function toLocalIsoString(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const r = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(r * c * 10) / 10;
+}
+
+function estimateReservationWindowMinutes(distanceKm: number | null): number {
+  const bufferMinutes = 5;
+  const travelMinutes = distanceKm !== null ? Math.max(3, Math.round(distanceKm * 1.8)) : 10;
+  return Math.min(30, Math.max(10, travelMinutes + bufferMinutes));
+}
+
 function parseAgentMessage(raw: string): { cleanText: string; stations: RecommendedAction[] } {
   const stations: RecommendedAction[] = [];
   const seenIds = new Set<number>();
   const regex = /\[\[STATION:(\d+):([^\]]+)\]\]/g;
-
   let match: RegExpExecArray | null = regex.exec(raw);
+
   while (match !== null) {
     const id = Number(match[1]);
     const name = match[2].trim();
@@ -111,30 +138,22 @@ export default function VoiceAgentWidget() {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const { role, carModel } = useAppSelector((state) => state.user);
-  const { currentBatteryPercent, targetBatteryPercent, driverLocation } = useAppSelector(
-    (state) => state.stations
-  );
+  const { currentBatteryPercent, targetBatteryPercent, driverLocation, selectedVehicleId } =
+    useAppSelector((state) => state.stations);
 
   const [isOpen, setIsOpen] = useState<boolean>(false);
+
   useEffect(() => {
+    function openAssistant() {
+      setIsOpen(true);
+    }
 
-  function openAssistant() {
-    setIsOpen(true);
-  }
+    window.addEventListener('smart-ev:open-assistant', openAssistant);
+    return () => {
+      window.removeEventListener('smart-ev:open-assistant', openAssistant);
+    };
+  }, []);
 
-  window.addEventListener(
-    'smart-ev:open-assistant',
-    openAssistant
-  );
-
-  return () => {
-    window.removeEventListener(
-      'smart-ev:open-assistant',
-      openAssistant
-    );
-  };
-
-}, []);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'ai',
@@ -281,11 +300,10 @@ export default function VoiceAgentWidget() {
     setErrorMessage(null);
     setHasActiveBookingError(false);
     setReservingStationId(stationId);
-
     try {
       const station = await apiFetch<Station>(`/ChargingStations/${stationId}`);
-      let vehicles = await apiFetch<VehicleDto[]>('/UsersVehicles/my');
 
+      let vehicles = await apiFetch<VehicleDto[]>('/UsersVehicles/my');
       if (vehicles.length === 0) {
         const created = await apiFetch<VehicleDto>('/UsersVehicles', {
           method: 'POST',
@@ -299,15 +317,34 @@ export default function VoiceAgentWidget() {
         vehicles = [created];
       }
 
+      const selectedVehicle =
+        vehicles.find((v) => v.id === selectedVehicleId) ??
+        vehicles.find(
+          (v) =>
+            v.supportedChargerType?.trim().toLowerCase() ===
+            station.chargerType.trim().toLowerCase()
+        ) ??
+        vehicles[0];
+
+      const distanceKm = driverLocation
+        ? calculateDistanceKm(
+            driverLocation.lat,
+            driverLocation.lng,
+            station.latitude,
+            station.longitude
+          )
+        : null;
+      const holdMinutes = estimateReservationWindowMinutes(distanceKm);
+
       const currentBattery = Math.min(currentBatteryPercent, 95);
       const targetBattery = Math.max(targetBatteryPercent, currentBattery + 1);
-      const arrivalTime = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+      const arrivalTime = toLocalIsoString(new Date(Date.now() + holdMinutes * 60 * 1000));
 
       await apiFetch('/ChargeBooking', {
         method: 'POST',
         body: JSON.stringify({
           stationId: station.id,
-          vehicleId: vehicles[0].id,
+          vehicleId: selectedVehicle.id,
           currentBatteryPercent: currentBattery,
           targetBatteryPercent: targetBattery,
           estimatedArrivalTime: arrivalTime,
@@ -370,7 +407,6 @@ export default function VoiceAgentWidget() {
       const coords = overrideLocation ? overrideLocation.coords : await resolveCurrentCoords();
       const addressLabel = overrideLocation ? overrideLocation.address : detectedAddress;
       const isRecheck = Boolean(overrideLocation);
-
       const promptWithLocationContext = coords
         ? `${trimmed}\n[נתוני מערכת: מיקום הנהג ${isRecheck ? 'עודכן כעת ל-' : 'הנוכחי הוא '}latitude=${coords.lat.toFixed(6)}, longitude=${coords.lng.toFixed(6)}${addressLabel ? ` (${addressLabel})` : ''}. ${isRecheck ? 'הנהג עדכן את מיקומו — התעלם מהמרחקים הקודמים והפעל מיד את FindBestStationsAsync עם הקואורדינטות החדשות האלו!' : 'אם לא צוינה כתובת אחרת בהודעה, השתמש מיד בקואורדינטות אלו ב-FindBestStationsAsync'} (אם הנהג מבקש "הכי קרוב" או ממהר, תן משקל weightDistance=0.85) וב-CalculateDistanceKm.]`
         : trimmed;
@@ -406,6 +442,15 @@ export default function VoiceAgentWidget() {
           parsedMsg = jsonErr.detail || jsonErr.title || jsonErr.message || errText;
         } catch {
           // נשאר טקסט רגיל
+        }
+        if (
+          response.status === 429 ||
+          response.status >= 500 ||
+          parsedMsg.includes('An unexpected error occurred')
+        ) {
+          throw new Error(
+            'שירות העוזר החכם אינו זמין כרגע (ייתכן שמכסת הבקשות היומית בשרת הסתיימה). אפשר להמשיך לחפש ולשריין עמדה דרך "חיפוש עמדות" או המפה.'
+          );
         }
         throw new Error(parsedMsg || `שגיאת שרת (${response.status})`);
       }
@@ -493,7 +538,6 @@ export default function VoiceAgentWidget() {
     e.preventDefault();
     const trimmed = manualAddressInput.trim();
     if (!trimmed || resolvingManual) return;
-
     setResolvingManual(true);
     setErrorMessage(null);
     try {
@@ -536,7 +580,6 @@ export default function VoiceAgentWidget() {
   const handleRefreshGpsClick = async () => {
     const coords = await requestGpsCoords();
     if (!coords || isStreaming) return;
-
     if (lastUserQueryRef.current) {
       void sendMessageToAgent(
         `ריעננתי מיקום GPS, בדוק לי מחדש: ${lastUserQueryRef.current}`,
@@ -561,7 +604,6 @@ export default function VoiceAgentWidget() {
 
     const w = window as WindowWithSpeech;
     const SpeechRec = w.SpeechRecognition ?? w.webkitSpeechRecognition;
-
     if (!SpeechRec) {
       setErrorMessage('זיהוי דיבור נתמך בדפדפני Chrome / Edge. אפשר גם להקליד רגיל.');
       return;
@@ -619,6 +661,7 @@ export default function VoiceAgentWidget() {
   return (
     <div
       dir="rtl"
+      className="ev-voice-widget"
       style={{
         position: 'fixed',
         bottom: '20px',
@@ -632,10 +675,11 @@ export default function VoiceAgentWidget() {
     >
       {isOpen && (
         <div
+          className="ev-voice-panel"
           style={{
             width: '385px',
             maxWidth: 'calc(100vw - 32px)',
-            height: '530px',
+            height: 'min(530px, calc(100dvh - 120px))',
             background: 'rgba(255, 255, 255, 0.98)',
             border: '1px solid var(--ev-border)',
             borderRadius: '18px',
@@ -931,7 +975,6 @@ export default function VoiceAgentWidget() {
                         ? 'חושב ומחפש עמדות מתאימות...'
                         : '')}
                   </div>
-
                   {stations.length > 0 && (
                     <div
                       style={{
@@ -960,7 +1003,7 @@ export default function VoiceAgentWidget() {
                             >
                               {reservingStationId === st.id
                                 ? 'משריין...'
-                                : `שריין את "${st.name}" (15 דק')`}
+                                : `שריין את "${st.name}" (שמירה אוטומטית)`}
                             </button>
                           )}
                           <button
@@ -1108,7 +1151,6 @@ export default function VoiceAgentWidget() {
                 </svg>
               )}
             </button>
-
             <input
               type="text"
               value={inputText}
@@ -1126,7 +1168,6 @@ export default function VoiceAgentWidget() {
                 outline: 'none',
               }}
             />
-
             <button
               type="submit"
               disabled={isStreaming || !inputText.trim()}
@@ -1149,7 +1190,7 @@ export default function VoiceAgentWidget() {
       )}
 
       {/* כפתורים צפים בתחתית המסך */}
-      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+      <div className="ev-voice-launchers" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
         <button
           type="button"
           onClick={() => setIsOpen((prev) => !prev)}

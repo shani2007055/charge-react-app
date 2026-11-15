@@ -680,3 +680,18 @@
     padding: 12px;
   }
 }
+@media (max-width: 600px) {
+  .ev-map-canvas {
+    height: 260px;
+  }
+
+  .ev-btn {
+    white-space: normal;
+    line-height: 1.35;
+    text-align: center;
+  }
+
+  .screen-header {
+    font-size: 1.08rem;
+  }
+}

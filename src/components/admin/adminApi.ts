@@ -1,9 +1,5 @@
-
 import { apiFetch } from '../../api/apiClient';
-
-import type { Station } from
-  '../../store/stations/stationsState';
-
+import type { Station } from '../../store/stations/stationsState';
 import {
   emptyAdminData,
   type AdminData,
@@ -14,7 +10,7 @@ import {
   type AdminBooking,
   type AdminReview,
   type AdminStatusLog,
-  type AdminSection
+  type AdminSection,
 } from './adminTypes';
 
 export interface AdminLoadResult {
@@ -25,13 +21,11 @@ export interface AdminLoadResult {
 export async function fetchAdminData(
   signal?: AbortSignal
 ): Promise<AdminLoadResult> {
-
   const data: AdminData = {
-    ...emptyAdminData
+    ...emptyAdminData,
   };
 
-  const errors:
-    Partial<Record<AdminSection, string>> = {};
+  const errors: Partial<Record<AdminSection, string>> = {};
 
   async function load<K extends AdminSection>(
     key: K,
@@ -39,50 +33,45 @@ export async function fetchAdminData(
   ) {
     try {
       const result = await request;
-
       if (!Array.isArray(result)) {
         throw new Error('מבנה נתונים לא תקין');
       }
-
       data[key] = result;
-
     } catch (error) {
-
       if (signal?.aborted) return;
-
-      errors[key] = error instanceof Error
-        ? error.message
-        : 'טעינת הנתונים נכשלה';
+      errors[key] =
+        error instanceof Error
+          ? error.message
+          : 'טעינת הנתונים נכשלה';
     }
   }
 
   await Promise.all([
-
-    load('users',
-      apiFetch<AdminUser[]>('/Users', { signal })),
-
-    load('drivers',
-      apiFetch<AdminDriver[]>('/Drivers', { signal })),
-
-    load('owners',
-      apiFetch<AdminOwner[]>('/Owner', { signal })),
-
-    load('stations',
-      apiFetch<Station[]>('/ChargingStations', { signal })),
-
-    load('vehicles',
-      apiFetch<AdminVehicle[]>('/UsersVehicles', { signal })),
-
-    load('bookings',
-      apiFetch<AdminBooking[]>('/ChargeBooking', { signal })),
-
-    load('reviews',
-      apiFetch<AdminReview[]>('/ReviewsToCharge', { signal })),
-
-    load('logs',
-      apiFetch<AdminStatusLog[]>('/StationStatusLogs', { signal }))
-
+    load('users', apiFetch<AdminUser[]>('/Users', { signal })),
+    load('drivers', apiFetch<AdminDriver[]>('/Drivers', { signal })),
+    load('owners', apiFetch<AdminOwner[]>('/Owner', { signal })),
+    load('stations', apiFetch<Station[]>('/ChargingStations', { signal })),
+    load('vehicles', apiFetch<AdminVehicle[]>('/UsersVehicles', { signal })),
+    load('bookings', apiFetch<AdminBooking[]>('/ChargeBooking', { signal })),
+    load('reviews', apiFetch<AdminReview[]>('/ReviewsToCharge', { signal })),
+    load('logs', apiFetch<AdminStatusLog[]>('/StationStatusLogs', { signal })),
   ]);
 
   return { data, errors };
+}
+
+export async function deleteAdminUser(userId: number): Promise<void> {
+  await apiFetch(`/Users/${userId}`, { method: 'DELETE' });
+}
+
+export async function deleteAdminDriver(driverId: number): Promise<void> {
+  await apiFetch(`/Drivers/${driverId}`, { method: 'DELETE' });
+}
+
+export async function deleteAdminOwner(ownerId: number): Promise<void> {
+  await apiFetch(`/Owner/${ownerId}`, { method: 'DELETE' });
+}
+
+export async function deleteAdminStatusLog(logId: number): Promise<void> {
+  await apiFetch(`/StationStatusLogs/${logId}`, { method: 'DELETE' });
 }
