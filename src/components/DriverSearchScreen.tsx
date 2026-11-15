@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { fetchStations, recommendStations } from '../store/stations/stationsThunks';
 import { setDriverLocation, setSearchBattery } from '../store/stations/stationsSlice';
+import PageHeader from './ui/PageHeader';
+import { MapPin, ListFilter } from 'lucide-react';
 
 interface NominatimAddress {
   road?: string;
@@ -329,16 +331,27 @@ export default function DriverSearchScreen() {
   }
 
   return (
-    <div
-      className="container"
-      dir="rtl"
-      style={{
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: '24px',
-        alignItems: 'flex-start',
-      }}
-    >
+  <div className="dash-page" dir="rtl">
+
+    <PageHeader
+      title="לאן נוסעים היום?"
+      description="מצאו את עמדת הטעינה שמתאימה בדיוק לצרכים שלכם"
+      icon={MapPin}
+      actions={
+        <button
+          type="button"
+          className="ev-btn ev-btn-secondary ev-btn-auto"
+          disabled={isBusy}
+          onClick={handleShowAllStations}
+        >
+          <ListFilter size={18} />
+          הצגת כל העמדות
+        </button>
+      }
+    />
+
+    <div className="dash-search-grid">
+
       {/* פאנל החיפוש המרכזי */}
       <div className="screen-view" style={{ flex: '2 1 500px' }}>
         <div className="screen-header">
@@ -346,14 +359,6 @@ export default function DriverSearchScreen() {
             <div>חיפוש והתאמת עמדת טעינה</div>
             <p className="ev-subtitle">הזן מיקום ומצב סוללה לחישוב העמדה המדויקת ביותר עבורך</p>
           </div>
-          <button
-            type="button"
-            className="ev-btn ev-btn-secondary ev-btn-auto"
-            disabled={isBusy}
-            onClick={handleShowAllStations}
-          >
-            הצג את כל העמדות
-          </button>
         </div>
 
         {errorMessage && <div className="ev-alert-error">{errorMessage}</div>}
@@ -651,6 +656,7 @@ export default function DriverSearchScreen() {
           נקבע לפי התחנה שתבחר.
         </div>
       </aside>
+    </div>
     </div>
   );
 }
