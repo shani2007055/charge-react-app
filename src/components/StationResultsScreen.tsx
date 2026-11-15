@@ -20,6 +20,36 @@ type QuickFilter = 'all' | 'available' | 'fast' | 'cheap';
 
 const ACTIVE_STATUSES = ['Held', 'Confirmed', 'Charging'];
 
+function toLocalIsoString(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const r = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(r * c * 10) / 10;
+}
+
+function estimateReservationWindow(distanceKm: number | null): {
+  travelMinutes: number;
+  bufferMinutes: number;
+  totalMinutes: number;
+} {
+  const bufferMinutes = 5;
+  const travelMinutes = distanceKm !== null ? Math.max(3, Math.round(distanceKm * 1.8)) : 10;
+  const totalMinutes = Math.min(30, Math.max(10, travelMinutes + bufferMinutes));
+  return { travelMinutes, bufferMinutes, totalMinutes };
+}
+
 export default function StationResultsScreen() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
@@ -58,7 +88,7 @@ export default function StationResultsScreen() {
   }, [dispatch, hasSearched]);
 
   const handleReserveStation = useCallback(
-    async (station: Station) => {
+    async (station: Station, explicitDistanceKm?: number) => {
       setBookingError(null);
       setReservingId(station.id);
 
@@ -80,7 +110,21 @@ export default function StationResultsScreen() {
         const vehicle = vehicles[0];
         const currentBattery = Math.min(currentBatteryPercent, 95);
         const targetBattery = Math.max(targetBatteryPercent, currentBattery + 1);
-        const arrivalTime = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+        const distanceKm =
+          typeof explicitDistanceKm === 'number'
+            ? explicitDistanceKm
+            : driverLocation
+              ? calculateDistanceKm(
+                  driverLocation.lat,
+                  driverLocation.lng,
+                  station.latitude,
+                  station.longitude
+                )
+              : null;
+
+        const { totalMinutes } = estimateReservationWindow(distanceKm);
+        const arrivalTime = toLocalIsoString(new Date(Date.now() + totalMinutes * 60 * 1000));
 
         await apiFetch('/ChargeBooking', {
           method: 'POST',
@@ -108,7 +152,7 @@ export default function StationResultsScreen() {
         setReservingId(null);
       }
     },
-    [carModel, currentBatteryPercent, targetBatteryPercent, navigate]
+    [carModel, currentBatteryPercent, targetBatteryPercent, driverLocation, navigate]
   );
 
   const matchesQuickFilter = useCallback(
@@ -145,8 +189,18 @@ export default function StationResultsScreen() {
         matchPercentage: rec.matchPercentage,
       }));
     }
-    return filteredItems.map((station) => ({ station }));
-  }, [hasSearched, filteredRecommendations, filteredItems]);
+    return filteredItems.map((station) => ({
+      station,
+      distanceKm: driverLocation
+        ? calculateDistanceKm(
+            driverLocation.lat,
+            driverLocation.lng,
+            station.latitude,
+            station.longitude
+          )
+        : undefined,
+    }));
+  }, [hasSearched, filteredRecommendations, filteredItems, driverLocation]);
 
   if (loading) {
     return (
@@ -325,109 +379,115 @@ export default function StationResultsScreen() {
                 )}
               </div>
             ) : (
-              filteredRecommendations.map((rec) => (
-                <div
-                  key={rec.station.id}
-                  className="ev-card"
-                  style={{
-                    padding: '18px 20px',
-                    borderColor: rec.isEmergencyMode ? 'var(--ev-danger-border)' : undefined,
-                    background: rec.isEmergencyMode ? 'var(--ev-danger-soft)' : undefined,
-                  }}
-                >
+              filteredRecommendations.map((rec) => {
+                const eta = estimateReservationWindow(rec.distanceKm);
+                return (
                   <div
+                    key={rec.station.id}
+                    className="ev-card"
                     style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'flex-start',
-                      gap: '12px',
+                      padding: '18px 20px',
+                      borderColor: rec.isEmergencyMode ? 'var(--ev-danger-border)' : undefined,
+                      background: rec.isEmergencyMode ? 'var(--ev-danger-soft)' : undefined,
                     }}
                   >
-                    <div>
-                      <h3
-                        style={{
-                          margin: 0,
-                          fontSize: '1.05rem',
-                          fontWeight: 700,
-                          color: 'var(--ev-ink)',
-                        }}
-                      >
-                        {rec.station.name}
-                      </h3>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'flex-start',
+                        gap: '12px',
+                      }}
+                    >
+                      <div>
+                        <h3
+                          style={{
+                            margin: 0,
+                            fontSize: '1.05rem',
+                            fontWeight: 700,
+                            color: 'var(--ev-ink)',
+                          }}
+                        >
+                          {rec.station.name}
+                        </h3>
+                        <div
+                          className="tabular-nums"
+                          style={{
+                            fontSize: '0.82rem',
+                            color: 'var(--ev-ink-muted)',
+                            marginTop: '4px',
+                          }}
+                        >
+                          {rec.station.address} · {rec.distanceKm} ק&quot;מ ממך · הגעה משוערת ~
+                          {eta.travelMinutes} דק&apos; (+{eta.bufferMinutes} דק&apos; מרווח)
+                        </div>
+                      </div>
+
                       <div
-                        className="tabular-nums"
                         style={{
-                          fontSize: '0.82rem',
-                          color: 'var(--ev-ink-muted)',
-                          marginTop: '4px',
+                          background: 'var(--ev-brand-soft)',
+                          border: '1px solid var(--ev-brand-border)',
+                          borderRadius: '8px',
+                          padding: '4px 10px',
+                          textAlign: 'center',
+                          flexShrink: 0,
                         }}
                       >
-                        {rec.station.address} · {rec.distanceKm} ק&quot;מ ממך
+                        <div
+                          className="font-mono-num"
+                          style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--ev-brand)' }}
+                        >
+                          {rec.matchPercentage}%
+                        </div>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--ev-ink-soft)' }}>התאמה</div>
                       </div>
                     </div>
+
+                    <p
+                      style={{
+                        margin: '10px 0 0 0',
+                        fontSize: '0.84rem',
+                        color: 'var(--ev-brand-hover)',
+                        fontWeight: 500,
+                      }}
+                    >
+                      {rec.matchReason}
+                    </p>
 
                     <div
                       style={{
-                        background: 'var(--ev-brand-soft)',
-                        border: '1px solid var(--ev-brand-border)',
-                        borderRadius: '8px',
-                        padding: '4px 10px',
-                        textAlign: 'center',
-                        flexShrink: 0,
+                        marginTop: '14px',
+                        paddingTop: '12px',
+                        borderTop: '1px solid var(--ev-surface-subtle)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '10px',
                       }}
                     >
-                      <div
-                        className="font-mono-num"
-                        style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--ev-brand)' }}
+                      <span
+                        className="tabular-nums"
+                        style={{ fontSize: '0.82rem', color: 'var(--ev-ink-muted)', fontWeight: 500 }}
                       >
-                        {rec.matchPercentage}%
-                      </div>
-                      <div style={{ fontSize: '0.68rem', color: 'var(--ev-ink-soft)' }}>התאמה</div>
+                        {rec.station.chargerType} · {rec.station.maxKw} kW · ₪
+                        {rec.station.pricePerKwh} לקוט&quot;ש
+                      </span>
+
+                      <button
+                        type="button"
+                        className="ev-btn ev-btn-auto"
+                        disabled={reservingId === rec.station.id || hasActiveBooking}
+                        onClick={() => void handleReserveStation(rec.station, rec.distanceKm)}
+                      >
+                        {reservingId === rec.station.id
+                          ? 'משריין עמדה...'
+                          : `שריין עמדה (הגעה ~${eta.totalMinutes} דק׳)`}
+                      </button>
                     </div>
                   </div>
-
-                  <p
-                    style={{
-                      margin: '10px 0 0 0',
-                      fontSize: '0.84rem',
-                      color: 'var(--ev-brand-hover)',
-                      fontWeight: 500,
-                    }}
-                  >
-                    {rec.matchReason}
-                  </p>
-
-                  <div
-                    style={{
-                      marginTop: '14px',
-                      paddingTop: '12px',
-                      borderTop: '1px solid var(--ev-surface-subtle)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      flexWrap: 'wrap',
-                      gap: '10px',
-                    }}
-                  >
-                    <span
-                      className="tabular-nums"
-                      style={{ fontSize: '0.82rem', color: 'var(--ev-ink-muted)', fontWeight: 500 }}
-                    >
-                      {rec.station.chargerType} · {rec.station.maxKw} kW · ₪
-                      {rec.station.pricePerKwh} לקוט&quot;ש
-                    </span>
-
-                    <button
-                      type="button"
-                      className="ev-btn ev-btn-auto"
-                      disabled={reservingId === rec.station.id || hasActiveBooking}
-                      onClick={() => void handleReserveStation(rec.station)}
-                    >
-                      {reservingId === rec.station.id ? 'משריין עמדה...' : 'שריין עמדה (15 דק׳)'}
-                    </button>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )
           ) : filteredItems.length === 0 ? (
             <div className="ev-card" style={{ textAlign: 'center', padding: '32px' }}>
@@ -449,6 +509,16 @@ export default function StationResultsScreen() {
           ) : (
             filteredItems.map((station) => {
               const isFaulty = !station.isActive || station.currentStatus === 'Faulty';
+              const distKm = driverLocation
+                ? calculateDistanceKm(
+                    driverLocation.lat,
+                    driverLocation.lng,
+                    station.latitude,
+                    station.longitude
+                  )
+                : null;
+              const eta = estimateReservationWindow(distKm);
+
               return (
                 <div key={station.id} className="ev-card" style={{ padding: '18px 20px' }}>
                   <div
@@ -470,8 +540,12 @@ export default function StationResultsScreen() {
                       >
                         {station.name}
                       </h3>
-                      <div style={{ fontSize: '0.82rem', color: 'var(--ev-ink-muted)', marginTop: '4px' }}>
+                      <div
+                        className="tabular-nums"
+                        style={{ fontSize: '0.82rem', color: 'var(--ev-ink-muted)', marginTop: '4px' }}
+                      >
                         {station.address}
+                        {distKm !== null && ` · ${distKm} ק"מ ממך (הגעה ~${eta.travelMinutes} דק')`}
                       </div>
                     </div>
 
@@ -511,9 +585,13 @@ export default function StationResultsScreen() {
                       type="button"
                       className="ev-btn ev-btn-auto"
                       disabled={!station.isActive || reservingId === station.id || hasActiveBooking}
-                      onClick={() => void handleReserveStation(station)}
+                      onClick={() => void handleReserveStation(station, distKm ?? undefined)}
                     >
-                      {reservingId === station.id ? 'משריין עמדה...' : 'שריין עמדה (15 דק׳)'}
+                      {reservingId === station.id
+                        ? 'משריין עמדה...'
+                        : distKm !== null
+                          ? `שריין עמדה (הגעה ~${eta.totalMinutes} דק׳)`
+                          : 'שריין עמדה'}
                     </button>
                   </div>
                 </div>

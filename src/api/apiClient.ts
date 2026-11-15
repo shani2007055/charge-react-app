@@ -1,6 +1,11 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
-const AUTH_EXEMPT_ENDPOINTS = ['/users/login', '/users/register'];
+const AUTH_EXEMPT_ENDPOINTS = [
+  '/users/login',
+  '/users/register',
+  '/users/forgot-password',
+  '/users/reset-password',
+];
 
 export function isTokenExpired(token: string): boolean {
   try {
@@ -38,8 +43,8 @@ export async function apiFetch<T>(
     ...(options.headers as Record<string, string>),
   };
 
-  // אם המשתמש מחובר, מצרפים אוטומטית את ה-JWT לכל בקשה
-  if (token) {
+  // אם המשתמש מחובר (ולא בבקשה ציבורית), מצרפים את ה-JWT
+  if (token && !isAuthEndpoint) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
@@ -57,8 +62,22 @@ export async function apiFetch<T>(
     const errorText = await response.text();
     let message = `שגיאת שרת (${response.status})`;
     try {
-      const errorJson = JSON.parse(errorText);
-      message = errorJson.detail || errorJson.title || errorJson.message || errorText || message;
+      const errorJson = JSON.parse(errorText) as {
+        detail?: string;
+        title?: string;
+        message?: string;
+        errors?: Record<string, string[]>;
+      };
+      const firstValidationError = errorJson.errors
+        ? Object.values(errorJson.errors).flat()[0]
+        : undefined;
+      message =
+        firstValidationError ||
+        errorJson.detail ||
+        errorJson.message ||
+        errorJson.title ||
+        errorText ||
+        message;
     } catch {
       if (errorText) message = errorText;
     }

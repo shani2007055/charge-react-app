@@ -11,17 +11,31 @@ interface ChargeBooking {
   status: 'Held' | 'Confirmed' | 'Charging' | 'Completed' | 'Cancelled' | 'Expired';
   currentBatteryPercent: number;
   targetBatteryPercent: number;
+  estimatedArrivalTime?: string;
+  holdExpiresAt?: string;
   createdAt: string;
 }
 
 const ACTIVE_STATUSES = ['Held', 'Confirmed', 'Charging'];
 
 const BOOKING_STEPS = [
-  { id: 'Held', label: "שמור ל-15 דק'" },
+  { id: 'Held', label: 'העמדה שמורה' },
   { id: 'Confirmed', label: 'הגעה אושרה' },
   { id: 'Charging', label: 'טעינה פעילה' },
   { id: 'Completed', label: 'סיום ודירוג' },
 ] as const;
+
+function parseSafeArrivalDate(estimatedArrivalTime: string, createdAt: string): Date {
+  const etaMs = new Date(estimatedArrivalTime).getTime();
+  const createdMs = new Date(createdAt).getTime();
+  if (Number.isNaN(etaMs)) return new Date();
+
+  // תיקון אוטומטי להזמנות ישנות שנשמרו ב-UTC בזמן ש-createdAt נשמר בשעון מקומי
+  if (!Number.isNaN(createdMs) && etaMs < createdMs - 30 * 60 * 1000) {
+    return new Date(etaMs - new Date().getTimezoneOffset() * 60 * 1000);
+  }
+  return new Date(etaMs);
+}
 
 export default function ActiveSessionScreen() {
   const [booking, setBooking] = useState<ChargeBooking | null>(null);
@@ -39,7 +53,9 @@ export default function ActiveSessionScreen() {
       const active = myBookings.find((b) => ACTIVE_STATUSES.includes(b.status)) ?? null;
       setBooking(active);
       if (active) {
-        const expiresAtMs = new Date(active.createdAt).getTime() + 15 * 60 * 1000;
+        const expiresAtMs = active.holdExpiresAt
+          ? new Date(active.holdExpiresAt).getTime()
+          : new Date(active.createdAt).getTime() + 15 * 60 * 1000;
         const remainingSec = Math.max(0, Math.floor((expiresAtMs - Date.now()) / 1000));
         setSecondsLeft(remainingSec);
       }
@@ -106,6 +122,13 @@ export default function ActiveSessionScreen() {
   const formattedTime = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   const isExpiringSoon = booking?.status === 'Held' && secondsLeft > 0 && secondsLeft <= 180;
 
+  const formattedEta = booking?.estimatedArrivalTime
+    ? parseSafeArrivalDate(booking.estimatedArrivalTime, booking.createdAt).toLocaleTimeString('he-IL', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : null;
+
   if (loading) {
     return (
       <div className="container" dir="rtl">
@@ -160,7 +183,7 @@ export default function ActiveSessionScreen() {
               אין לך כרגע שריון או טעינה פעילה
             </h3>
             <p style={{ margin: '0 0 20px 0', fontSize: '0.88rem', color: 'var(--ev-ink-soft)' }}>
-              בחרי עמדה מומלצת מהחיפוש כדי לשריין שקע מראש ל-15 דקות.
+              בחרי עמדה מומלצת מהחיפוש כדי לשריין שקע מראש לפני ההגעה.
             </p>
             <button
               type="button"
@@ -187,14 +210,15 @@ export default function ActiveSessionScreen() {
                   {booking.stationName}
                 </h3>
                 <p style={{ margin: '4px 0 0 0', fontSize: '0.86rem', color: 'var(--ev-ink-muted)' }}>
-                  {booking.stationAddress} · {booking.vehicleModel}
+                  {booking.stationAddress}
+                  {booking.vehicleModel ? ` · ${booking.vehicleModel}` : ''}
                 </p>
               </div>
 
               <div style={{ textAlign: 'left' }}>
                 <div style={{ fontSize: '0.75rem', color: 'var(--ev-ink-soft)' }}>יעד סוללה</div>
                 <div className="font-mono-num" style={{ fontSize: '1rem', fontWeight: 700 }}>
-                  {booking.currentBatteryPercent}% → {booking.targetBatteryPercent}%
+                  {booking.currentBatteryPercent}% ← {booking.targetBatteryPercent}%
                 </div>
               </div>
             </div>
@@ -275,6 +299,19 @@ export default function ActiveSessionScreen() {
                 >
                   {formattedTime}
                 </div>
+                {formattedEta && (
+                  <div
+                    className="tabular-nums"
+                    style={{
+                      marginTop: '8px',
+                      fontSize: '0.8rem',
+                      color: 'var(--ev-ink-muted)',
+                      fontWeight: 500,
+                    }}
+                  >
+                    הגעה מתוכננת (לפי מרחק ומרווח ביטחון): <strong>{formattedEta}</strong>
+                  </div>
+                )}
               </div>
             )}
 
@@ -305,7 +342,7 @@ export default function ActiveSessionScreen() {
                   className="font-mono-num"
                   style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--ev-brand)' }}
                 >
-                  {booking.currentBatteryPercent}% → {booking.targetBatteryPercent}%
+                  {booking.currentBatteryPercent}% ← {booking.targetBatteryPercent}%
                 </span>
               </div>
             )}

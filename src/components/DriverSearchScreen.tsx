@@ -247,13 +247,32 @@ export default function DriverSearchScreen() {
     if (selected === 'distance') {
       return { weightDistance: 0.7, weightRating: 0.1, weightPrice: 0.1, weightSpeed: 0.1 };
     }
-    if (selected === 'speed') {
-      return { weightDistance: 0.2, weightRating: 0.2, weightPrice: 0.1, weightSpeed: 0.5 };
+    if (selected === 'rating') {
+      return { weightDistance: 0.15, weightRating: 0.7, weightPrice: 0.1, weightSpeed: 0.05 };
     }
     if (selected === 'price') {
-      return { weightDistance: 0.2, weightRating: 0.2, weightPrice: 0.5, weightSpeed: 0.1 };
+      return { weightDistance: 0.15, weightRating: 0.15, weightPrice: 0.6, weightSpeed: 0.1 };
+    }
+    if (selected === 'speed') {
+      return { weightDistance: 0.2, weightRating: 0.15, weightPrice: 0.1, weightSpeed: 0.55 };
     }
     return { weightDistance: 0.25, weightRating: 0.3, weightPrice: 0.25, weightSpeed: 0.2 };
+  }
+
+  function getPriorityHint(selected: string): string {
+    if (selected === 'distance') {
+      return 'מתעדף את העמדות הקרובות ביותר למיקום שבחרת.';
+    }
+    if (selected === 'rating') {
+      return 'מתעדף עמדות עם הציון והביקורות הטובות ביותר מנהגים.';
+    }
+    if (selected === 'price') {
+      return 'מתעדף את המחיר הנמוך ביותר לקוט"ש.';
+    }
+    if (selected === 'speed') {
+      return 'מתאים את הספק העמדה (kW) לזמן הפנוי שלך — מהיר לזמן קצר, רגיל וחסכוני לזמן ארוך.';
+    }
+    return 'משלב באופן מאוזן קרבה, דירוג גולשים, מחיר והתאמת מהירות.';
   }
 
   async function runRecommendation(overrideBattery?: number) {
@@ -532,7 +551,6 @@ export default function DriverSearchScreen() {
                 onChange={(e) => setAvailableTimeMinutes(Number(e.target.value))}
               />
             </div>
-
             <div className="form-group">
               <label>סוג שקע</label>
               <select
@@ -545,7 +563,6 @@ export default function DriverSearchScreen() {
                 <option value="Type2">Type2</option>
               </select>
             </div>
-
             <div className="form-group">
               <label>סדר עדיפויות</label>
               <select
@@ -554,11 +571,23 @@ export default function DriverSearchScreen() {
                 onChange={(e) => setPriority(e.target.value)}
               >
                 <option value="balanced">איזון חכם</option>
-                <option value="distance">מרחק קצר ביותר</option>
-                <option value="speed">מהירות וחיסכון בזמן</option>
+                <option value="distance">הכי קרובה (מרחק)</option>
+                <option value="rating">דירוג וביקורות גבוהות</option>
                 <option value="price">מחיר הזול ביותר</option>
+                <option value="speed">התאמת מהירות טעינה (kW)</option>
               </select>
             </div>
+          </div>
+
+          <div
+            style={{
+              fontSize: '0.78rem',
+              color: 'var(--ev-ink-soft)',
+              marginTop: '-6px',
+              marginBottom: '12px',
+            }}
+          >
+            {getPriorityHint(priority)}
           </div>
 
           <button type="submit" className="btn" disabled={isBusy} style={{ marginTop: '6px' }}>
