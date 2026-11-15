@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { getErrorMessage } from '../utils/errorHandler';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../api/apiClient';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
@@ -191,8 +192,8 @@ export default function LoginScreen() {
       }
       navigate(selectedRole === 'Owner' ? '/owner' : '/search');
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'שגיאה בחיבור לשרת');
-    }
+  setErrorMessage(getErrorMessage(err));
+}
   }
 
   async function handleForgotRequest(e: FormEvent<HTMLFormElement>) {
