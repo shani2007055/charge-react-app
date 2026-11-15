@@ -1,5 +1,18 @@
+
 import { useEffect, type ReactNode } from 'react';
-import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+
+import {
+  Navigate,
+  Outlet,
+  Route,
+  Routes,
+  NavLink,
+  useNavigate
+} from 'react-router-dom';
+import { Zap, Mic } from 'lucide-react';
+import RoleSwitcher from './components/RoleSwitcher';
+import AdminDashboard from './components/admin/AdminDashboard';
+import HomeScreen from './components/HomeScreen';
 import LoginScreen from './components/LoginScreen';
 import DriverSearchScreen from './components/DriverSearchScreen';
 import StationResultsScreen from './components/StationResultsScreen';
@@ -8,167 +21,401 @@ import RatingAndReportScreen from './components/RatingAndReportScreen';
 import UserProfileScreen from './components/UserProfileScreen';
 import StationOwnerScreen from './components/StationOwnerScreen';
 import VoiceAgentWidget from './components/VoiceAgentWidget';
-import { useAppDispatch, useAppSelector } from './store/hooks';
-import { expireSession, logout } from './store/user/userSlice';
-import './App.css';
 
-function ProtectedRoute({ children }: { children: ReactNode }) {
-  const token = useAppSelector((state) => state.user.token);
-  if (!token) {
-    return <Navigate to="/" replace />;
+import {
+  isAdminToken,
+  type UserRole
+} from './store/user/userState';
+
+import {
+  useAppDispatch,
+  useAppSelector
+} from './store/hooks';
+
+import {
+  expireSession,
+  logout
+} from './store/user/userSlice';
+
+import './App.css';
+import './Modern.css';
+
+
+function getHomePath(
+  token: string | null,
+  role: UserRole
+) {
+  if (isAdminToken(token)) {
+    return '/admin';
   }
+
+  return role === 'Owner'
+    ? '/owner'
+    : '/search';
+}
+
+
+function ProtectedRoute({
+  children,
+  requiredRole
+}: {
+  children: ReactNode;
+  requiredRole?: UserRole;
+}) {
+
+  const { token, role } = useAppSelector(
+    state => state.user
+  );
+
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (isAdminToken(token)) {
+    return <Navigate to="/admin" replace />;
+  }
+
+  if (requiredRole && role !== requiredRole) {
+    return (
+      <Navigate
+        to={getHomePath(token, role)}
+        replace
+      />
+    );
+  }
+
   return <>{children}</>;
 }
 
+
+function AdminRoute({
+  children
+}: {
+  children: ReactNode;
+}) {
+
+  const { token, role } = useAppSelector(
+    state => state.user
+  );
+
+  if (!token) {
+    return <Navigate to="/login" replace />;
+  }
+
+  if (!isAdminToken(token)) {
+    return (
+      <Navigate
+        to={getHomePath(token, role)}
+        replace
+      />
+    );
+  }
+
+  return <>{children}</>;
+}
+
+
 function Layout() {
-  const { token, role, name } = useAppSelector((state) => state.user);
+
+  const { token, role, name } = useAppSelector(
+    state => state.user
+  );
+
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  const location = useLocation();
-  const homePath = role === 'Owner' ? '/owner' : '/search';
+
+  const isAdmin = isAdminToken(token);
+  const homePath = getHomePath(token, role);
 
   useEffect(() => {
+
     const handleSessionExpired = () => {
       dispatch(expireSession());
-      navigate('/', { replace: true });
+
+      navigate('/login', {
+        replace: true
+      });
     };
-    window.addEventListener('auth:expired', handleSessionExpired);
-    return () => window.removeEventListener('auth:expired', handleSessionExpired);
+
+    window.addEventListener(
+      'auth:expired',
+      handleSessionExpired
+    );
+
+    return () => window.removeEventListener(
+      'auth:expired',
+      handleSessionExpired
+    );
+
   }, [dispatch, navigate]);
+
+
+  function handleLogout() {
+    dispatch(logout());
+
+    navigate('/', {
+      replace: true
+    });
+  }
+
 
   return (
     <div className="ev-app-shell" dir="rtl">
-      <svg
-        className="ev-bg-contours"
-        viewBox="0 0 1440 900"
-        fill="none"
-        preserveAspectRatio="xMidYMid slice"
-        aria-hidden="true"
-      >
-        <path
-          d="M-80 180 C 260 90, 440 340, 820 220 C 1120 125, 1290 280, 1520 190"
-          stroke="#EA580C"
-          strokeWidth="2.5"
-        />
-        <path
-          d="M-60 440 C 310 520, 580 310, 960 430 C 1220 510, 1340 390, 1520 460"
-          stroke="#EA580C"
-          strokeWidth="1.5"
-          strokeDasharray="8 8"
-        />
-        <path
-          d="M-40 720 C 280 610, 640 820, 1020 670 C 1260 575, 1380 690, 1520 640"
-          stroke="#EA580C"
-          strokeWidth="2"
-        />
-        <circle cx="820" cy="220" r="7" fill="#EA580C" />
-        <circle cx="960" cy="430" r="6" fill="#EA580C" />
-        <circle cx="310" cy="485" r="5" fill="#EA580C" />
-      </svg>
 
-      <header className="ev-header">
-        <div className="ev-header-inner">
-          <button
-            type="button"
-            className="ev-brand"
-            onClick={() => navigate(token ? homePath : '/')}
+      <header className="modern-header">
+
+        <div className="modern-header-inner">
+
+          <NavLink
+            to="/"
+            className="modern-logo"
           >
-            <svg
-              className="ev-brand-icon"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-            </svg>
-            <span>Smart EV</span>
-          </button>
 
-          {token && (
-            <nav className="ev-nav" aria-label="ניווט ראשי">
-              <button
-                type="button"
-                className={`ev-nav-link ${location.pathname === homePath ? 'active' : ''}`}
-                onClick={() => navigate(homePath)}
-              >
-                {role === 'Owner' ? 'ניהול עמדות' : 'חיפוש עמדות'}
-              </button>
+            <span className="modern-logo-icon">
+              <Zap size={25} />
+            </span>
 
-              {role === 'Driver' && (
+            <span>
+              Smart EV
+              <small>CHARGE SMARTER</small>
+            </span>
+
+          </NavLink>
+
+
+          <nav
+            className="modern-nav"
+            aria-label="ניווט ראשי"
+          >
+
+            <NavLink to="/" end>
+              דף הבית
+            </NavLink>
+
+            {token && (
+              isAdmin ? (
+
+                <NavLink to="/admin">
+                  לוח בקרה
+                </NavLink>
+
+              ) : (
+
                 <>
-                  <button
-                    type="button"
-                    className={`ev-nav-link ${location.pathname === '/results' ? 'active' : ''}`}
-                    onClick={() => navigate('/results')}
-                  >
-                    מפה ותוצאות
-                  </button>
-                  <button
-                    type="button"
-                    className={`ev-nav-link ${location.pathname === '/active' ? 'active' : ''}`}
-                    onClick={() => navigate('/active')}
-                  >
-                    השריון שלי
-                  </button>
+
+                  <NavLink to={homePath}>
+                    {role === 'Owner'
+                      ? 'ניהול תחנות'
+                      : 'חיפוש עמדות'}
+                  </NavLink>
+
+                  {role === 'Driver' && (
+                    <>
+
+                      <NavLink to="/results">
+                        מפה ותוצאות
+                      </NavLink>
+
+                      <NavLink to="/active">
+                        השריון שלי
+                      </NavLink>
+                      <button
+  type="button"
+  className="modern-ai-nav"
+  onClick={() => {
+    window.dispatchEvent(
+      new Event('smart-ev:open-assistant')
+    );
+  }}
+>
+  <Mic size={17} />
+  עוזר AI
+</button>
+
+                    </>
+                  )}
+
+                  <NavLink to="/profile">
+                    הפרופיל שלי
+                  </NavLink>
+
                 </>
-              )}
+
+              )
+            )}
+
+          </nav>
+
+
+          <div className="modern-actions">
+
+            {token ? (
+
+              <>
+
+                <RoleSwitcher />
+
+                <span className="modern-user">
+                  שלום, {name}
+                </span>
+
+                <button
+                  type="button"
+                  className="modern-outline"
+                  onClick={handleLogout}
+                >
+                  התנתקות
+                </button>
+
+              </>
+
+            ) : (
 
               <button
                 type="button"
-                className={`ev-nav-link ${location.pathname === '/profile' ? 'active' : ''}`}
-                onClick={() => navigate('/profile')}
+                className="modern-primary"
+                onClick={() => navigate('/login')}
               >
-                פרופיל
+                כניסה למערכת
               </button>
-            </nav>
-          )}
 
-          {token && (
-            <div className="ev-header-actions">
-              <span className="ev-user-greeting">שלום, {name}</span>
-              <button
-                type="button"
-                className="ev-btn ev-btn-secondary ev-btn-auto"
-                onClick={() => {
-                  dispatch(logout());
-                  navigate('/');
-                }}
-              >
-                התנתקות
-              </button>
-            </div>
-          )}
+            )}
+
+          </div>
+
         </div>
+
       </header>
+
 
       <main className="ev-main">
         <Outlet />
       </main>
 
-      {token && <VoiceAgentWidget />}
+
+      {token && !isAdmin && role === 'Driver' && (
+        <VoiceAgentWidget />
+      )}
+
+
+      <footer className="modern-footer">
+
+        <strong>
+          <Zap
+            size={18}
+            style={{ verticalAlign: 'middle' }}
+          />
+          {' '}Smart EV
+        </strong>
+
+        <span>
+          הדרך החכמה לטעינה חשמלית
+        </span>
+
+      </footer>
+
     </div>
   );
 }
 
+
 export default function App() {
+
+  const { token, role } = useAppSelector(
+    state => state.user
+  );
+
+  const homePath = getHomePath(token, role);
+
   return (
     <Routes>
+
       <Route element={<Layout />}>
-        <Route path="/" element={<LoginScreen />} />
-        <Route path="/search" element={<ProtectedRoute><DriverSearchScreen /></ProtectedRoute>} />
-        <Route path="/results" element={<ProtectedRoute><StationResultsScreen /></ProtectedRoute>} />
-        <Route path="/active" element={<ProtectedRoute><ActiveSessionScreen /></ProtectedRoute>} />
-        <Route path="/rating" element={<ProtectedRoute><RatingAndReportScreen /></ProtectedRoute>} />
-        <Route path="/profile" element={<ProtectedRoute><UserProfileScreen /></ProtectedRoute>} />
-        <Route path="/owner" element={<ProtectedRoute><StationOwnerScreen /></ProtectedRoute>} />
-        <Route path="*" element={<Navigate to="/" replace />} />
+
+        <Route
+          path="/"
+          element={<HomeScreen />}
+        />
+
+        <Route
+          path="/login"
+          element={
+            token
+              ? <Navigate to={homePath} replace />
+              : <LoginScreen />
+          }
+        />
+
+        <Route
+          path="/search"
+          element={
+            <ProtectedRoute requiredRole="Driver">
+              <DriverSearchScreen />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/results"
+          element={
+            <ProtectedRoute requiredRole="Driver">
+              <StationResultsScreen />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/active"
+          element={
+            <ProtectedRoute requiredRole="Driver">
+              <ActiveSessionScreen />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/rating"
+          element={
+            <ProtectedRoute requiredRole="Driver">
+              <RatingAndReportScreen />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/profile"
+          element={
+            <ProtectedRoute>
+              <UserProfileScreen />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/owner"
+          element={
+            <ProtectedRoute requiredRole="Owner">
+              <StationOwnerScreen />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/admin"
+          element={
+            <AdminRoute>
+              <AdminDashboard />
+            </AdminRoute>
+          }
+        />
+
+        <Route
+          path="*"
+          element={<Navigate to="/" replace />}
+        />
+
       </Route>
+
     </Routes>
   );
 }

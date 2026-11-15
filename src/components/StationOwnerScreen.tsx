@@ -1,6 +1,18 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { apiFetch } from '../api/apiClient';
 import type { Station } from '../store/stations/stationsState';
+import PageHeader from './ui/PageHeader';
+import StatCard from './ui/StatCard';
+
+import {
+  LayoutDashboard,
+  Zap,
+  CircleCheck,
+  TriangleAlert,
+  CalendarDays,
+  Star,
+  Plus
+} from 'lucide-react';
 
 interface UserClaim {
   type: string;
@@ -308,42 +320,35 @@ export default function StationOwnerScreen() {
     : 0;
 
   return (
-    <div className="container" dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
-      {/* כותרת לוח ניהול + כפתור הוספה קומפקטי */}
-      <div
-        className="ev-card"
-        style={{
-          padding: '20px 24px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '14px',
-        }}
-      >
-        <div>
-          <h1 style={{ margin: 0, fontSize: '1.3rem', fontWeight: 700, color: 'var(--ev-ink)' }}>
-            לוח ניהול עמדות טעינה
-          </h1>
-          <p style={{ margin: '4px 0 0', fontSize: '0.86rem', color: 'var(--ev-ink-soft)' }}>
-            ניהול זמינות, תעריפים, הזמנות נכנסות ודיווחי תקינות במקום אחד
-          </p>
-        </div>
+  <div className="dash-page" dir="rtl">
 
-        {dashboard && (
+    <PageHeader
+      title="לוח ניהול תחנות"
+      description="ניהול התחנות, ההזמנות, הביקורות והזמינות במקום אחד"
+      icon={LayoutDashboard}
+      actions={
+        dashboard && (
           <button
             type="button"
-            className={`ev-btn ev-btn-auto ${showAddForm ? 'ev-btn-secondary' : 'ev-btn-accent'}`}
+            className={`ev-btn ev-btn-auto ${
+              showAddForm
+                ? 'ev-btn-secondary'
+                : 'ev-btn-accent'
+            }`}
             onClick={() => {
-              setShowAddForm((prev) => !prev);
+              setShowAddForm(prev => !prev);
               setError(null);
             }}
           >
-            {showAddForm ? 'סגור טופס הוספה' : '+ הוסף עמדה חדשה'}
-          </button>
-        )}
-      </div>
+            <Plus size={19} />
 
+            {showAddForm
+              ? 'סגור טופס הוספה'
+              : 'הוספת עמדה חדשה'}
+          </button>
+        )
+      }
+    />
       {error && (
         <div className="ev-alert-error" style={{ marginBottom: 0 }}>
           {error}
@@ -466,56 +471,44 @@ export default function StationOwnerScreen() {
           )}
 
           {/* שורת מדדים קומפקטית */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-              gap: '12px',
-            }}
-          >
-            <div className="ev-card" style={{ padding: '15px 18px' }}>
-              <div style={{ fontSize: '0.76rem', color: 'var(--ev-ink-soft)' }}>סה&quot;כ עמדות</div>
-              <div className="font-mono-num" style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '3px' }}>
-                {dashboard.totalStationsCount}
-              </div>
-            </div>
-            <div className="ev-card" style={{ padding: '15px 18px' }}>
-              <div style={{ fontSize: '0.76rem', color: 'var(--ev-ink-soft)' }}>עמדות פעילות</div>
-              <div
-                className="font-mono-num"
-                style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--ev-brand)', marginTop: '3px' }}
-              >
-                {dashboard.activeStationsCount}
-              </div>
-            </div>
-            <div className="ev-card" style={{ padding: '15px 18px' }}>
-              <div style={{ fontSize: '0.76rem', color: 'var(--ev-ink-soft)' }}>עמדות תקולות</div>
-              <div
-                className="font-mono-num"
-                style={{
-                  fontSize: '1.4rem',
-                  fontWeight: 700,
-                  color: dashboard.faultyStationsCount > 0 ? 'var(--ev-danger)' : 'var(--ev-ink)',
-                  marginTop: '3px',
-                }}
-              >
-                {dashboard.faultyStationsCount}
-              </div>
-            </div>
-            <div className="ev-card" style={{ padding: '15px 18px' }}>
-              <div style={{ fontSize: '0.76rem', color: 'var(--ev-ink-soft)' }}>סה&quot;כ הזמנות</div>
-              <div className="font-mono-num" style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '3px' }}>
-                {dashboard.totalBookings}
-              </div>
-            </div>
-            <div className="ev-card" style={{ padding: '15px 18px' }}>
-              <div style={{ fontSize: '0.76rem', color: 'var(--ev-ink-soft)' }}>דירוג ממוצע</div>
-              <div className="font-mono-num" style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '3px' }}>
-                {dashboard.averageRating !== null ? dashboard.averageRating.toFixed(1) : '—'}
-              </div>
-            </div>
-          </div>
+          <div className="dash-stats">
 
+  <StatCard
+    title="סה״כ עמדות"
+    value={dashboard.totalStationsCount}
+    icon={Zap}
+    tone="orange"
+  />
+
+  <StatCard
+    title="עמדות פעילות"
+    value={dashboard.activeStationsCount}
+    icon={CircleCheck}
+    tone="green"
+  />
+
+  <StatCard
+    title="עמדות תקולות"
+    value={dashboard.faultyStationsCount}
+    icon={TriangleAlert}
+    tone="red"
+  />
+
+  <StatCard
+    title="סה״כ הזמנות"
+    value={dashboard.totalBookings}
+    icon={CalendarDays}
+    tone="blue"
+  />
+
+  <StatCard
+    title="דירוג ממוצע"
+    value={dashboard.averageRating?.toFixed(1) ?? '—'}
+    icon={Star}
+    tone="orange"
+  />
+
+</div>
           {/* סרגל טאבים */}
           <div
             style={{

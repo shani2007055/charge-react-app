@@ -1,0 +1,380 @@
+
+.home-page {
+  color: #0f172a;
+  width: 100%;
+}
+
+.home-hero {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  min-height: 64vh;
+  background: #0f172a;
+  border-radius: 28px;
+  overflow: hidden;
+  box-shadow: 0 24px 70px #0f172a20;
+}
+
+.home-hero-content {
+  position: relative;
+  padding: clamp(30px, 5vw, 90px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  animation: fade-up 0.8s ease both;
+}
+
+.home-tag {
+  background: #ffffff15;
+  color: #fdba74;
+  border: 1px solid #ffffff20;
+  border-radius: 30px;
+  padding: 8px 18px;
+  font-weight: 600;
+}
+
+.home-hero h1 {
+  font-size: clamp(38px, 4.5vw, 76px);
+  line-height: 1.13;
+  color: white;
+  font-weight: 800;
+  margin: 25px 0;
+}
+
+.home-hero h1 span {
+  display: block;
+  color: #fb923c;
+}
+
+.home-hero p {
+  color: #cbd5e1;
+  font-size: clamp(17px, 1.4vw, 22px);
+  line-height: 1.8;
+  max-width: 550px;
+  margin: 0 0 32px;
+}
+
+.home-primary {
+  background: #ea580c;
+  color: white;
+  padding: 16px 32px;
+  border: none;
+  border-radius: 13px;
+  font: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 25px #ea580c30;
+  transition: 0.3s;
+}
+
+.home-primary:hover {
+  background: #c2410c;
+  transform: translateY(-4px);
+  box-shadow: 0 15px 35px #ea580c50;
+}
+
+.home-hero-image {
+  background-image:
+    linear-gradient(
+      to left,
+      #0f172a40,
+      transparent 50%
+    ),
+    url('/ev-charging.jpg');
+
+  background-size: cover;
+  background-position: center;
+  min-height: 350px;
+  animation: image-reveal 1s ease both;
+}
+
+.home-features {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+  margin-top: 32px;
+}
+
+.home-features article {
+  background: white;
+  padding: 30px;
+  border-radius: 22px;
+  border: 1px solid #e2e8f0;
+  transition: 0.3s;
+  animation: fade-up 0.7s ease both;
+}
+
+.home-features article:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+.home-features article:nth-child(3) {
+  animation-delay: 0.2s;
+}
+
+.home-features article:nth-child(4) {
+  animation-delay: 0.3s;
+}
+
+.home-features article:hover {
+  transform: translateY(-8px);
+  border-color: #fdba74;
+  box-shadow: 0 18px 45px #0f172a12;
+}
+
+.home-features article span {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  background: #fff7ed;
+  border-radius: 16px;
+  font-size: 27px;
+}
+
+.home-features h3 {
+  font-size: 21px;
+  margin: 18px 0 8px;
+}
+
+.home-features p {
+  color: #64748b;
+  font-size: 15px;
+  line-height: 1.7;
+  margin: 0;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes image-reveal {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 1000px) {
+  .home-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .home-features {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 550px) {
+  .home-features {
+    grid-template-columns: 1fr;
+  }
+
+  .home-hero-image {
+    min-height: 260px;
+  }
+
+  .home-hero {
+    border-radius: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-page * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+/* Minimal features strip */
+
+.home-page {
+  border-radius: 28px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 20px 60px #0f172a12;
+  background: white;
+}
+
+.home-hero {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.home-features {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  margin: 0;
+  padding: 25px 10px;
+  background: #ffffff;
+}
+
+.home-features article {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+  padding: 15px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: default;
+  transition: transform 0.25s ease;
+}
+
+.home-features article svg {
+  width: 36px;
+  height: 36px;
+  color: #ea580c;
+  stroke-width: 1.8;
+  transition: transform 0.25s ease;
+}
+
+.home-features article h3 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+  text-align: center;
+  color: #0f172a;
+}
+
+.home-features article:hover {
+  transform: none;
+  box-shadow: none;
+  border: none;
+}
+
+.home-features article:hover svg {
+  transform: translateY(-5px) scale(1.1);
+}
+
+@media (max-width: 650px) {
+  .home-features {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 15px;
+  }
+
+  .home-features article h3 {
+    font-size: 15px;
+  }
+
+  .home-features article svg {
+    width: 28px;
+    height: 28px;
+  }
+}
+
+.home-feature-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+
+  position: relative;
+  background: transparent;
+  border: 0;
+  border-inline-end: 1px solid #e2e8f0;
+
+  padding: 24px 15px;
+  font: inherit;
+  color: #0f172a;
+  cursor: pointer;
+
+  transition: background 0.25s;
+}
+
+.home-feature-button:last-child {
+  border-inline-end: 0;
+}
+
+.home-feature-button > svg {
+  color: #ea580c;
+  transition: transform 0.25s;
+}
+
+.home-feature-button h3 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.home-feature-button p {
+  font-size: 13px;
+  margin: 0;
+  color: #64748b;
+}
+
+.home-feature-button:hover {
+  background: #fff7ed;
+}
+
+.home-feature-button:hover > svg {
+  transform: translateY(-4px);
+}
+
+.home-feature-button:focus-visible {
+  outline: 2px solid #ea580c;
+  outline-offset: -3px;
+}
+
+.home-feature-arrow {
+  opacity: 0.7;
+}
+
+.home-ai-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+
+  margin-top: 16px;
+  padding: 14px 22px;
+
+  border: 1px solid #ffffff45;
+  border-radius: 12px;
+  background: #ffffff0d;
+  color: white;
+
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.home-ai-button svg {
+  color: #fb923c;
+}
+
+.home-ai-button:hover {
+  background: #ffffff20;
+}
+
+@media (max-width: 650px) {
+
+  .home-feature-button {
+    border: 0;
+    padding: 18px 10px;
+  }
+
+  .home-feature-button h3 {
+    font-size: 16px;
+  }
+
+  .home-feature-button p {
+    font-size: 12px;
+  }
+}

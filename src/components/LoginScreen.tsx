@@ -1,12 +1,54 @@
+
 import { useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
+
+import {
+  Mail,
+  LockKeyhole,
+  UserRound,
+  Phone,
+  CarFront,
+  Zap,
+  MapPin,
+  CalendarCheck,
+  ShieldCheck,
+  ArrowRight,
+  ArrowLeft,
+  KeyRound,
+  LoaderCircle,
+  AlertCircle,
+  CheckCircle2
+} from 'lucide-react';
+
+import AuthField from './AuthField';
+
 import { apiFetch } from '../api/apiClient';
-import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { loginUser, registerUser } from '../store/user/userThunks';
+import { getErrorMessage } from '../utils/errorHandler';
+
+import {
+  useAppDispatch,
+  useAppSelector
+} from '../store/hooks';
+
+import {
+  loginUser,
+  registerUser
+} from '../store/user/userThunks';
+
 import type { UserRole } from '../store/user/userState';
 
+import {
+  validateLogin,
+  validateRegister,
+  validateEmail,
+  validateReset,
+  type AuthErrors,
+  type AuthFieldName
+} from '../utils/authValidation';
+
+import './LoginScreen.css';
+
 type AuthMode = 'login' | 'register' | 'forgot';
-type ForgotStep = 'request' | 'reset';
 
 interface ForgotPasswordResponse {
   message?: string;
@@ -14,913 +56,653 @@ interface ForgotPasswordResponse {
   devCode?: string | null;
 }
 
-const PASSWORD_RULE = /^(?=.*[A-Za-z])(?=.*\d).{8,100}$/;
-
 function buildStrongPassword(): string {
-  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-  const lower = 'abcdefghijkmnopqrstuvwxyz';
-  const digits = '23456789';
-  const special = '!@#$%&*';
-  const all = upper + lower + digits + special;
-
-  const pick = (pool: string) => {
-    const arr = new Uint32Array(1);
-    window.crypto.getRandomValues(arr);
-    return pool[arr[0] % pool.length];
-  };
-
-  const chars = [
-    pick(upper),
-    pick(upper),
-    pick(lower),
-    pick(lower),
-    pick(digits),
-    pick(digits),
-    pick(special),
+  const groups = [
+    'ABCDEFGHJKLMNPQRSTUVWXYZ',
+    'abcdefghijkmnopqrstuvwxyz',
+    '23456789',
+    '!@#$%&*'
   ];
 
-  while (chars.length < 12) {
+  const all = groups.join('');
+
+  const pick = (pool: string) => {
+    const random = crypto.getRandomValues(
+      new Uint32Array(1)
+    )[0];
+
+    return pool[random % pool.length];
+  };
+
+  const chars = groups.map(pick);
+
+  while (chars.length < 16) {
     chars.push(pick(all));
   }
 
   for (let i = chars.length - 1; i > 0; i--) {
-    const arr = new Uint32Array(1);
-    window.crypto.getRandomValues(arr);
-    const j = arr[0] % (i + 1);
-    const temp = chars[i];
-    chars[i] = chars[j];
-    chars[j] = temp;
+    const random = crypto.getRandomValues(
+      new Uint32Array(1)
+    )[0];
+
+    const j = random % (i + 1);
+
+    [chars[i], chars[j]] = [chars[j], chars[i]];
   }
 
   return chars.join('');
 }
 
-function EyeIcon({ open }: { open: boolean }) {
-  if (open) {
-    return (
-      <svg
-        width="18"
-        height="18"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-        <line x1="1" y1="1" x2="23" y2="23" />
-      </svg>
-    );
-  }
-
-  return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  );
-}
-
-const eyeButtonStyle = {
-  position: 'absolute' as const,
-  right: '10px',
-  top: '50%',
-  transform: 'translateY(-50%)',
-  background: 'transparent',
-  border: 'none',
-  padding: '4px',
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  color: '#64748B',
-  cursor: 'pointer',
-};
-
 export default function LoginScreen() {
-  const [authMode, setAuthMode] = useState<AuthMode>('login');
-  const [selectedRole, setSelectedRole] = useState<UserRole>('Driver');
-  const [hasStation, setHasStation] = useState<boolean>(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  const [mode, setMode] = useState<AuthMode>('login');
+
+  const [role, setRole] =
+    useState<UserRole>('Driver');
+
+  const [values, setValues] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    password: '',
+    confirmPassword: '',
+    code: ''
+  });
+
+  const [errors, setErrors] =
+    useState<AuthErrors>({});
+
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
 
-  // מצב שחזור סיסמה
-  const [forgotStep, setForgotStep] = useState<ForgotStep>('request');
-  const [resetCode, setResetCode] = useState('');
-  const [devResetCode, setDevResetCode] = useState<string | null>(null);
-  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotStep, setForgotStep] =
+    useState<'request' | 'reset'>('request');
 
-  const navigate = useNavigate();
+  const [forgotLoading, setForgotLoading] =
+    useState(false);
+
+  const [resetEmail, setResetEmail] = useState('');
+
+  const [devCode, setDevCode] =
+    useState<string | null>(null);
+
   const dispatch = useAppDispatch();
-  const { loading } = useAppSelector((state) => state.user);
+ 
 
-  function isValidEmail(value: string) {
-    return value.includes('@') && value.includes('.');
-  }
+  const { loading, sessionExpiredMessage } =
+    useAppSelector(state => state.user);
 
-  function handleGenerateStrongPassword() {
-    const generated = buildStrongPassword();
-    setPassword(generated);
-    setConfirmPassword(generated);
-    setShowPassword(true);
-    setShowConfirmPassword(true);
+  const busy = loading || forgotLoading;
+
+  function updateField(
+    name: AuthFieldName,
+    value: string
+  ) {
+    setValues(previous => ({
+      ...previous,
+      [name]: value
+    }));
+
+    setErrors(previous => ({
+      ...previous,
+      [name]: undefined
+    }));
+
     setErrorMessage('');
   }
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  function changeMode(nextMode: AuthMode) {
+
+    if (busy) return;
+
+    setMode(nextMode);
+    setErrors({});
     setErrorMessage('');
     setSuccessMessage('');
+    setForgotStep('request');
+    setDevCode(null);
+    setResetEmail('');
 
-    if (authMode === 'login') {
-      if (!email || !password) {
-        setErrorMessage('נא למלא אימייל וסיסמה.');
-        return;
-      }
-    } else if (authMode === 'register') {
-      if (!fullName || !email || !phone || !password || !confirmPassword) {
-        setErrorMessage('נא למלא את כל שדות החובה בהרשמה.');
-        return;
-      }
-      if (!PASSWORD_RULE.test(password)) {
-        setErrorMessage('הסיסמה חייבת להכיל לפחות 8 תווים, כולל אות באנגלית ומספר.');
-        return;
-      }
-      if (password !== confirmPassword) {
-        setErrorMessage('הסיסמאות אינן תואמות.');
-        return;
-      }
-    }
+    setValues(previous => ({
+      ...previous,
+      password: '',
+      confirmPassword: '',
+      code: ''
+    }));
+  }
 
-    if (!isValidEmail(email)) {
-      setErrorMessage('כתובת האימייל אינה תקינה (חסר @ או נקודה).');
-      return;
-    }
+  function generatePassword() {
+
+    const password = buildStrongPassword();
+
+    setValues(previous => ({
+      ...previous,
+      password,
+      confirmPassword: password
+    }));
+
+    setErrors(previous => ({
+      ...previous,
+      password: undefined,
+      confirmPassword: undefined
+    }));
+
+    setSuccessMessage(
+      'נוצרה סיסמה חזקה. מומלץ לשמור אותה במנהל הסיסמאות.'
+    );
+    setErrorMessage('');
+  }
+
+  async function handleAuth() {
+
+    const validation =
+      mode === 'register'
+        ? validateRegister(values)
+        : validateLogin(values.email, values.password);
+
+    setErrors(validation);
+
+    if (Object.keys(validation).length > 0) return;
 
     try {
-      if (authMode === 'login') {
-        await dispatch(loginUser({ email, password, role: selectedRole })).unwrap();
+
+      if (mode === 'login') {
+
+        await dispatch(loginUser({
+          email: values.email.trim(),
+          password: values.password,
+          role
+        })).unwrap();
+
       } else {
-        await dispatch(
-          registerUser({
-            name: fullName,
-            email,
-            phone,
-            password,
-            confirmPassword,
-            role: selectedRole,
-          })
-        ).unwrap();
+
+        await dispatch(registerUser({
+          name: values.name.trim(),
+          email: values.email.trim(),
+          phone: values.phone.trim(),
+          password: values.password,
+          confirmPassword: values.confirmPassword,
+          role
+        })).unwrap();
       }
-      navigate(selectedRole === 'Owner' ? '/owner' : '/search');
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'שגיאה בחיבור לשרת');
+
+      
+
+    } catch (error) {
+      setErrorMessage(getErrorMessage(error));
     }
   }
 
-  async function handleForgotRequest(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setErrorMessage('');
-    setSuccessMessage('');
+  async function handleForgot() {
 
-    const trimmedEmail = email.trim();
-    if (!isValidEmail(trimmedEmail)) {
-      setErrorMessage('נא להזין כתובת אימייל תקינה.');
-      return;
-    }
+    if (forgotStep === 'request') {
 
-    setForgotLoading(true);
-    try {
-      const res = await apiFetch<ForgotPasswordResponse>('/users/forgot-password', {
-        method: 'POST',
-        body: JSON.stringify({ email: trimmedEmail }),
-      });
+      const emailError = validateEmail(values.email);
 
-      setDevResetCode(res.devCode ?? null);
-      if (res.devCode) {
-        setResetCode(res.devCode);
+      if (emailError) {
+        setErrors({ email: emailError });
+        return;
       }
-      setSuccessMessage(
-        res.message || 'אם כתובת האימייל קיימת במערכת, נשלח קוד איפוס בן 6 ספרות.'
+
+      setForgotLoading(true);
+
+      try {
+
+        const email = values.email.trim();
+
+        const response =
+          await apiFetch<ForgotPasswordResponse>(
+            '/users/forgot-password',
+            {
+              method: 'POST',
+              body: JSON.stringify({ email })
+            }
+          );
+
+        setResetEmail(email);
+        setForgotStep('reset');
+
+        if (import.meta.env.DEV) {
+          setDevCode(response.devCode ?? null);
+        }
+
+        setSuccessMessage(
+          'אם החשבון קיים, נשלח קוד איפוס לכתובת האימייל.'
+        );
+
+      } catch (error) {
+        setErrorMessage(getErrorMessage(error));
+      } finally {
+        setForgotLoading(false);
+      }
+
+    } else {
+
+      const validation = validateReset(
+        resetEmail,
+        values.code,
+        values.password,
+        values.confirmPassword
       );
-      setForgotStep('reset');
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'שגיאה בשליחת בקשת איפוס סיסמה');
-    } finally {
-      setForgotLoading(false);
+
+      setErrors(validation);
+
+      if (Object.keys(validation).length > 0) return;
+
+      setForgotLoading(true);
+
+      try {
+
+        await apiFetch('/users/reset-password', {
+          method: 'POST',
+          body: JSON.stringify({
+            email: resetEmail,
+            code: values.code.trim(),
+            newPassword: values.password,
+            confirmNewPassword: values.confirmPassword
+          })
+        });
+
+        setMode('login');
+        setForgotStep('request');
+        setDevCode(null);
+        setResetEmail('');
+
+        setValues(previous => ({
+          ...previous,
+          password: '',
+          confirmPassword: '',
+          code: ''
+        }));
+
+        setSuccessMessage(
+          'הסיסמה אופסה בהצלחה. ניתן להתחבר כעת.'
+        );
+
+      } catch (error) {
+        setErrorMessage(getErrorMessage(error));
+      } finally {
+        setForgotLoading(false);
+      }
     }
   }
 
-  async function handleResetPassword(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  async function handleSubmit(
+    event: FormEvent<HTMLFormElement>
+  ) {
+    event.preventDefault();
+
+    if (busy) return;
+
+    setErrors({});
     setErrorMessage('');
     setSuccessMessage('');
 
-    const trimmedEmail = email.trim();
-    const trimmedCode = resetCode.trim();
-
-    if (!isValidEmail(trimmedEmail)) {
-      setErrorMessage('כתובת האימייל אינה תקינה.');
-      return;
-    }
-    if (trimmedCode.length !== 6) {
-      setErrorMessage('יש להזין קוד אימות בן 6 ספרות.');
-      return;
-    }
-    if (!PASSWORD_RULE.test(password)) {
-      setErrorMessage('הסיסמה החדשה חייבת להכיל לפחות 8 תווים, אות באנגלית ומספר.');
-      return;
-    }
-    if (password !== confirmPassword) {
-      setErrorMessage('הסיסמאות אינן תואמות.');
-      return;
-    }
-
-    setForgotLoading(true);
-    try {
-      await apiFetch<{ message?: string }>('/users/reset-password', {
-        method: 'POST',
-        body: JSON.stringify({
-          email: trimmedEmail,
-          code: trimmedCode,
-          newPassword: password,
-          confirmNewPassword: confirmPassword,
-        }),
-      });
-
-      setAuthMode('login');
-      setForgotStep('request');
-      setResetCode('');
-      setDevResetCode(null);
-      setPassword('');
-      setConfirmPassword('');
-      setShowPassword(false);
-      setShowConfirmPassword(false);
-      setSuccessMessage('הסיסמה אופסה בהצלחה! כעת ניתן להתחבר עם הסיסמה החדשה.');
-    } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'שגיאה באיפוס הסיסמה');
-    } finally {
-      setForgotLoading(false);
+    if (mode === 'forgot') {
+      await handleForgot();
+    } else {
+      await handleAuth();
     }
   }
+
+  const title =
+    mode === 'login'
+      ? 'טוב שחזרתם'
+      : mode === 'register'
+        ? 'בואו נתחיל'
+        : 'שחזור סיסמה';
 
   return (
-    <div
-      className="container"
-      dir="rtl"
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-        gap: '24px',
-        alignItems: 'stretch',
-      }}
-    >
-      {/* כרטיס היכרות ותועלת מרכזית */}
-      <div
-        className="ev-card"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-          padding: '32px',
-        }}
-      >
-        <div>
-          <p
-            style={{
-              margin: '0 0 10px 0',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              color: 'var(--ev-brand)',
-            }}
-          >
-            טעינה חכמה · שריון בזמן אמת · ניהול עמדות
-          </p>
-          <h2
-            style={{
-              margin: '0 0 12px 0',
-              fontSize: '1.75rem',
-              lineHeight: 1.3,
-              fontWeight: 700,
-              color: 'var(--ev-ink)',
-            }}
-          >
-            למצוא עמדת טעינה פנויה, לשריין מראש ולהגיע בראש שקט.
-          </h2>
-          <p
-            style={{
-              margin: '0 0 28px 0',
-              fontSize: '0.95rem',
-              lineHeight: 1.65,
-              color: 'var(--ev-ink-muted)',
-            }}
-          >
-            מערכת תפעולית לנהגים ולבעלי עמדות בישראל. חישוב התאמה מדויק לפי מצב הסוללה,
-            סוג שקע, מרחק ומחיר לקוט&quot;ש — עם שריון דינמי לפי המרחק שלך ועוזר קולי בעברית.
-          </p>
+    <div className="auth-page" dir="rtl">
 
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-              gap: '16px',
-              paddingTop: '20px',
-              borderTop: '1px solid var(--ev-border)',
-            }}
-          >
-            <div>
-              <div className="tabular-nums" style={{ fontSize: '1.05rem', fontWeight: 700 }}>
-                10–30 דק&apos;
-              </div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--ev-ink-soft)', marginTop: '4px' }}>
-                שריון דינמי לפי מרחק + ביטחון
-              </div>
-            </div>
-            <div>
-              <div className="tabular-nums" style={{ fontSize: '1.05rem', fontWeight: 700 }}>
-                CCS · Type2
-              </div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--ev-ink-soft)', marginTop: '4px' }}>
-                התאמה אוטומטית לשקע הרכב
-              </div>
-            </div>
-            <div>
-              <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>זמן אמת</div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--ev-ink-soft)', marginTop: '4px' }}>
-                דיווחי תקינות וזמינות קהילתיים
-              </div>
-            </div>
+      <aside className="auth-visual">
+
+        <div className="auth-visual-content">
+
+          <div className="auth-tag">
+            <Zap size={16} />
+            SMART EV EXPERIENCE
           </div>
+
+          <h2>
+            כל הדרך שלך.
+            <span> במקום אחד.</span>
+          </h2>
+
+          <p>
+            חיפוש חכם, שריון מראש וניהול טעינה פשוט.
+          </p>
+
+          <div className="auth-benefits">
+
+            <div>
+              <MapPin />
+              מציאת התחנה המתאימה
+            </div>
+
+            <div>
+              <CalendarCheck />
+              שריון בזמן אמת
+            </div>
+
+            <div>
+              <ShieldCheck />
+              חיבור מאובטח
+            </div>
+
+          </div>
+
         </div>
 
-        <div
-          style={{
-            marginTop: '28px',
-            paddingTop: '16px',
-            borderTop: '1px solid var(--ev-surface-subtle)',
-            fontSize: '0.8rem',
-            color: 'var(--ev-ink-soft)',
-          }}
-        >
-          התחברו כנהגים לחיפוש ושריון עמדות, או כבעלי עמדות לניהול זמינות, תמחור ותקלות.
-        </div>
-      </div>
+      </aside>
 
-      {/* כרטיס התחברות, הרשמה ושחזור סיסמה */}
-      <div className="ev-card" style={{ padding: '32px' }}>
-        {authMode !== 'forgot' ? (
-          <div className="auth-toggle">
+      <section className="auth-panel">
+
+        <Link to="/" className="auth-back">
+          <ArrowRight size={17} />
+          חזרה לדף הבית
+        </Link>
+
+        <div className="auth-heading">
+
+          <span className="auth-kicker">
+            SMART EV
+          </span>
+
+          <h1>{title}</h1>
+
+          <p>
+            {mode === 'login'
+              ? 'התחברו לחשבון שלכם והמשיכו בדרך'
+              : mode === 'register'
+                ? 'הצטרפו לעולם הטעינה החכמה'
+                : 'נחזיר לכם את הגישה לחשבון'}
+          </p>
+
+        </div>
+
+        {mode !== 'forgot' && (
+          <div className="auth-tabs">
+
             <button
               type="button"
-              className={`auth-toggle-btn ${authMode === 'login' ? 'active' : ''}`}
-              onClick={() => {
-                setAuthMode('login');
-                setErrorMessage('');
-                setSuccessMessage('');
-              }}
+              disabled={busy}
+              className={mode === 'login' ? 'active' : ''}
+              onClick={() => changeMode('login')}
             >
               התחברות
             </button>
+
             <button
               type="button"
-              className={`auth-toggle-btn ${authMode === 'register' ? 'active' : ''}`}
-              onClick={() => {
-                setAuthMode('register');
-                setErrorMessage('');
-                setSuccessMessage('');
-              }}
+              disabled={busy}
+              className={mode === 'register' ? 'active' : ''}
+              onClick={() => changeMode('register')}
             >
               הרשמה חדשה
             </button>
-          </div>
-        ) : (
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: '18px',
-              paddingBottom: '12px',
-              borderBottom: '1px solid var(--ev-border)',
-            }}
-          >
-            <div>
-              <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--ev-ink)' }}>
-                שחזור סיסמה
-              </h3>
-              <div style={{ fontSize: '0.8rem', color: 'var(--ev-ink-soft)', marginTop: '2px' }}>
-                {forgotStep === 'request'
-                  ? 'שלב 1 מתוך 2: הזנת אימייל לקבלת קוד אימות'
-                  : 'שלב 2 מתוך 2: הזנת קוד אימות ובחירת סיסמה חדשה'}
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode('login');
-                setForgotStep('request');
-                setErrorMessage('');
-                setSuccessMessage('');
-                setDevResetCode(null);
-                setResetCode('');
-              }}
-              style={{
-                background: 'transparent',
-                border: '1px solid var(--ev-border)',
-                borderRadius: '8px',
-                padding: '6px 10px',
-                fontSize: '0.8rem',
-                fontWeight: 600,
-                color: 'var(--ev-ink-muted)',
-                cursor: 'pointer',
-              }}
-            >
-              חזרה להתחברות
-            </button>
+
           </div>
         )}
 
-        {errorMessage && <div className="ev-alert-error">{errorMessage}</div>}
+        {(errorMessage || sessionExpiredMessage) && (
+          <div className="auth-message error" role="alert">
+            <AlertCircle size={19} />
+            {errorMessage || sessionExpiredMessage}
+          </div>
+        )}
 
         {successMessage && (
-          <div
-            style={{
-              background: '#F0FDF4',
-              border: '1px solid #BBF7D0',
-              color: '#15803D',
-              padding: '10px 14px',
-              borderRadius: '10px',
-              fontSize: '0.86rem',
-              marginBottom: '14px',
-              lineHeight: 1.5,
-            }}
-          >
+          <div className="auth-message success" role="status">
+            <CheckCircle2 size={19} />
             {successMessage}
           </div>
         )}
 
-        {authMode === 'forgot' ? (
-          forgotStep === 'request' ? (
-            <form onSubmit={handleForgotRequest}>
-              <div className="form-group">
-                <label htmlFor="forgot-email">כתובת אימייל</label>
-                <input
-                  id="forgot-email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  className="form-control"
-                  placeholder="user@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  dir="ltr"
-                  style={{ textAlign: 'left' }}
-                />
-              </div>
+        <form
+          className="auth-form"
+          onSubmit={handleSubmit}
+          noValidate
+        >
 
-              <button type="submit" className="btn" disabled={forgotLoading}>
-                {forgotLoading ? 'שולח בקשה...' : 'שלח קוד איפוס'}
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={handleResetPassword}>
-              {devResetCode && (
-                <div
-                  className="ev-alert-brand"
-                  style={{
-                    padding: '10px 12px',
-                    borderRadius: '10px',
-                    fontSize: '0.82rem',
-                    marginBottom: '14px',
-                  }}
+          {mode !== 'forgot' && (
+            <>
+              <label className="auth-role-title">
+                בחירת פרופיל
+              </label>
+
+              <div className="auth-role-options">
+
+                <button
+                  type="button"
+                  disabled={busy}
+                  aria-pressed={role === 'Driver'}
+                  className={role === 'Driver' ? 'selected' : ''}
+                  onClick={() => setRole('Driver')}
                 >
-                  מצב פיתוח מקומי (ללא שרת מייל): קוד האימות שלך הוא{' '}
-                  <strong className="tabular-nums" dir="ltr">
-                    {devResetCode}
-                  </strong>
+                  <CarFront size={24} />
+                  <strong>נהג</strong>
+                  <small>חיפוש וטעינה</small>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={busy}
+                  aria-pressed={role === 'Owner'}
+                  className={role === 'Owner' ? 'selected' : ''}
+                  onClick={() => setRole('Owner')}
+                >
+                  <Zap size={24} />
+                  <strong>בעל תחנה</strong>
+                  <small>ניהול עמדות</small>
+                </button>
+
+              </div>
+            </>
+          )}
+
+          {mode === 'register' && (
+            <div className="auth-field-grid">
+
+              <AuthField
+                name="name"
+                label="שם מלא"
+                icon={UserRound}
+                autoComplete="name"
+                value={values.name}
+                maxLength={60}
+                error={errors.name}
+                disabled={busy}
+                onChange={v => updateField('name', v)}
+              />
+
+              <AuthField
+                name="phone"
+                label="מספר טלפון"
+                type="tel"
+                icon={Phone}
+                autoComplete="tel"
+                value={values.phone}
+                placeholder="050-1234567"
+                error={errors.phone}
+                disabled={busy}
+                onChange={v => updateField('phone', v)}
+              />
+
+            </div>
+          )}
+
+          <AuthField
+            name="email"
+            label="כתובת אימייל"
+            type="email"
+            icon={Mail}
+            autoComplete="email"
+            value={
+              mode === 'forgot' && forgotStep === 'reset'
+                ? resetEmail
+                : values.email
+            }
+            placeholder="name@example.com"
+            error={errors.email}
+            disabled={
+              busy ||
+              (mode === 'forgot' && forgotStep === 'reset')
+            }
+            onChange={v => updateField('email', v)}
+          />
+
+          {mode === 'forgot' && forgotStep === 'reset' && (
+            <>
+              {import.meta.env.DEV && devCode && (
+                <div className="auth-dev-code">
+                  קוד פיתוח מקומי: {devCode}
                 </div>
               )}
 
-              <div className="form-group">
-                <label htmlFor="reset-email">כתובת אימייל</label>
-                <input
-                  id="reset-email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  className="form-control"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  dir="ltr"
-                  style={{ textAlign: 'left' }}
-                />
-              </div>
+              <AuthField
+                name="code"
+                label="קוד אימות"
+                icon={KeyRound}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={values.code}
+                error={errors.code}
+                disabled={busy}
+                onChange={v =>
+                  updateField(
+                    'code',
+                    v.replace(/\D/g, '').slice(0, 6)
+                  )
+                }
+              />
+            </>
+          )}
 
-              <div className="form-group">
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    marginBottom: '6px',
-                  }}
-                >
-                  <label htmlFor="reset-code" style={{ margin: 0 }}>
-                    קוד אימות (6 ספרות)
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setForgotStep('request');
-                      setErrorMessage('');
-                      setSuccessMessage('');
-                    }}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      padding: 0,
-                      color: 'var(--ev-brand)',
-                      fontSize: '0.78rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    שלח קוד מחדש
-                  </button>
-                </div>
-                <input
-                  id="reset-code"
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={6}
-                  className="form-control tabular-nums"
-                  placeholder="123456"
-                  value={resetCode}
-                  onChange={(e) => setResetCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  dir="ltr"
-                  style={{ textAlign: 'left', letterSpacing: '0.2em', fontWeight: 700 }}
-                />
-              </div>
+          {(mode !== 'forgot' || forgotStep === 'reset') && (
+            <AuthField
+              name="password"
+              label={
+                mode === 'forgot'
+                  ? 'סיסמה חדשה'
+                  : 'סיסמה'
+              }
+              type="password"
+              icon={LockKeyhole}
+              autoComplete={
+                mode === 'login'
+                  ? 'current-password'
+                  : 'new-password'
+              }
+              value={values.password}
+              error={errors.password}
+              disabled={busy}
+              onChange={v => updateField('password', v)}
+            />
+          )}
 
-              <div className="form-group">
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: '8px',
-                    marginBottom: '6px',
-                  }}
-                >
-                  <label htmlFor="reset-password" style={{ margin: 0 }}>
-                    סיסמה חדשה (8+ תווים, אות באנגלית ומספר)
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleGenerateStrongPassword}
-                    style={{
-                      background: 'var(--ev-brand-soft)',
-                      color: 'var(--ev-brand-hover)',
-                      border: '1px solid var(--ev-brand-border)',
-                      borderRadius: '7px',
-                      padding: '3px 9px',
-                      fontSize: '0.74rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    צור סיסמה חזקה
-                  </button>
-                </div>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    id="reset-password"
-                    name="new-password"
-                    type={showPassword ? 'text' : 'password'}
-                    autoComplete="new-password"
-                    className="form-control"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    dir="ltr"
-                    style={{ textAlign: 'left', paddingRight: '38px' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((prev) => !prev)}
-                    aria-label={showPassword ? 'הסתר סיסמה' : 'הצג סיסמה'}
-                    title={showPassword ? 'הסתר סיסמה' : 'הצג סיסמה'}
-                    style={eyeButtonStyle}
-                  >
-                    <EyeIcon open={showPassword} />
-                  </button>
-                </div>
-              </div>
+          {(mode === 'register' ||
+            (mode === 'forgot' && forgotStep === 'reset')) && (
+            <>
+              <AuthField
+                name="confirmPassword"
+                label="אימות סיסמה"
+                type="password"
+                icon={LockKeyhole}
+                autoComplete="new-password"
+                value={values.confirmPassword}
+                error={errors.confirmPassword}
+                disabled={busy}
+                onChange={v =>
+                  updateField('confirmPassword', v)
+                }
+              />
 
-              <div className="form-group">
-                <label htmlFor="reset-confirm-password">אימות סיסמה חדשה</label>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    id="reset-confirm-password"
-                    name="confirm-new-password"
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    autoComplete="new-password"
-                    className="form-control"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    dir="ltr"
-                    style={{ textAlign: 'left', paddingRight: '38px' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword((prev) => !prev)}
-                    aria-label={showConfirmPassword ? 'הסתר סיסמה' : 'הצג סיסמה'}
-                    title={showConfirmPassword ? 'הסתר סיסמה' : 'הצג סיסמה'}
-                    style={eyeButtonStyle}
-                  >
-                    <EyeIcon open={showConfirmPassword} />
-                  </button>
-                </div>
-              </div>
+              <div className="auth-password-info">
+                לפחות 8 תווים, אות באנגלית ומספר.
 
-              <button type="submit" className="btn" disabled={forgotLoading}>
-                {forgotLoading ? 'מעדכן סיסמה...' : 'אפס סיסמה ועבור להתחברות'}
-              </button>
-            </form>
-          )
-        ) : (
-          <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label>אופן כניסה למערכת</label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                 <button
                   type="button"
-                  onClick={() => setSelectedRole('Driver')}
-                  style={{
-                    padding: '10px 12px',
-                    borderRadius: '9px',
-                    border:
-                      selectedRole === 'Driver'
-                        ? '1.5px solid var(--ev-brand)'
-                        : '1px solid var(--ev-border)',
-                    background:
-                      selectedRole === 'Driver' ? 'var(--ev-brand-soft)' : 'var(--ev-surface)',
-                    color: selectedRole === 'Driver' ? 'var(--ev-brand-hover)' : 'var(--ev-ink)',
-                    fontFamily: 'var(--font-sans)',
-                    fontSize: '0.86rem',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
+                  className="auth-text-button"
+                  disabled={busy}
+                  onClick={generatePassword}
                 >
-                  נהג רכב חשמלי
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedRole('Owner')}
-                  style={{
-                    padding: '10px 12px',
-                    borderRadius: '9px',
-                    border:
-                      selectedRole === 'Owner'
-                        ? '1.5px solid var(--ev-brand)'
-                        : '1px solid var(--ev-border)',
-                    background:
-                      selectedRole === 'Owner' ? 'var(--ev-brand-soft)' : 'var(--ev-surface)',
-                    color: selectedRole === 'Owner' ? 'var(--ev-brand-hover)' : 'var(--ev-ink)',
-                    fontFamily: 'var(--font-sans)',
-                    fontSize: '0.86rem',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                  }}
-                >
-                  בעל עמדת טעינה
+                  יצירת סיסמה חזקה
                 </button>
               </div>
-            </div>
+            </>
+          )}
 
-            {authMode === 'register' && (
+          {mode === 'login' && (
+            <button
+              type="button"
+              className="auth-text-button"
+              disabled={busy}
+              onClick={() => changeMode('forgot')}
+            >
+              שכחתי סיסמה
+            </button>
+          )}
+
+          <button
+            type="submit"
+            className="auth-submit"
+            disabled={busy}
+          >
+
+            {busy ? (
               <>
-                <div className="form-group">
-                  <label htmlFor="auth-fullname">שם מלא</label>
-                  <input
-                    id="auth-fullname"
-                    name="name"
-                    type="text"
-                    autoComplete="name"
-                    className="form-control"
-                    placeholder="ישראל ישראלי"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                  />
-                </div>
+                <LoaderCircle className="auth-spinner" size={20} />
+                מבצע פעולה...
+              </>
+            ) : (
+              <>
+                {mode === 'login'
+                  ? 'כניסה למערכת'
+                  : mode === 'register'
+                    ? 'יצירת חשבון'
+                    : forgotStep === 'request'
+                      ? 'שליחת קוד איפוס'
+                      : 'איפוס סיסמה'}
 
-                <div className="form-group">
-                  <label htmlFor="auth-phone">טלפון</label>
-                  <input
-                    id="auth-phone"
-                    name="tel"
-                    type="tel"
-                    autoComplete="tel"
-                    className="form-control"
-                    placeholder="050-1234567"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                  />
-                </div>
+                <ArrowLeft size={20} />
               </>
             )}
 
-            <div className="form-group">
-              <label htmlFor="auth-email">כתובת אימייל</label>
-              <input
-                id="auth-email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                className="form-control"
-                placeholder="user@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                dir="ltr"
-                style={{ textAlign: 'left' }}
-              />
-            </div>
+          </button>
 
-            <div className="form-group">
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  gap: '8px',
-                  marginBottom: '6px',
-                }}
-              >
-                <label htmlFor="auth-password" style={{ margin: 0 }}>
-                  {authMode === 'register'
-                    ? 'סיסמה (לפחות 8 תווים, אות באנגלית ומספר)'
-                    : 'סיסמה'}
-                </label>
-                {authMode === 'register' ? (
-                  <button
-                    type="button"
-                    onClick={handleGenerateStrongPassword}
-                    style={{
-                      background: 'var(--ev-brand-soft)',
-                      color: 'var(--ev-brand-hover)',
-                      border: '1px solid var(--ev-brand-border)',
-                      borderRadius: '7px',
-                      padding: '3px 9px',
-                      fontSize: '0.74rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    צור סיסמה חזקה
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAuthMode('forgot');
-                      setForgotStep('request');
-                      setErrorMessage('');
-                      setSuccessMessage('');
-                      setPassword('');
-                      setConfirmPassword('');
-                      setDevResetCode(null);
-                      setResetCode('');
-                    }}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      padding: 0,
-                      color: 'var(--ev-brand)',
-                      fontSize: '0.8rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    שכחתי סיסמה?
-                  </button>
-                )}
-              </div>
-              <div style={{ position: 'relative' }}>
-                <input
-                  id="auth-password"
-                  name={authMode === 'register' ? 'new-password' : 'password'}
-                  type={showPassword ? 'text' : 'password'}
-                  autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
-                  className="form-control"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  dir="ltr"
-                  style={{ textAlign: 'left', paddingRight: '38px' }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((prev) => !prev)}
-                  aria-label={showPassword ? 'הסתר סיסמה' : 'הצג סיסמה'}
-                  title={showPassword ? 'הסתר סיסמה' : 'הצג סיסמה'}
-                  style={eyeButtonStyle}
-                >
-                  <EyeIcon open={showPassword} />
-                </button>
-              </div>
-              {authMode === 'register' && (
-                <div style={{ fontSize: '0.75rem', color: 'var(--ev-ink-soft)', marginTop: '5px' }}>
-                  Chrome/Google יציעו אוטומטית סיסמה חזקה בשדה זה, או שניתן ליצור סיסמה בלחיצה למעלה.
-                </div>
-              )}
-            </div>
-
-            {authMode === 'register' && (
-              <div className="form-group">
-                <label htmlFor="auth-confirm-password">אימות סיסמה</label>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    id="auth-confirm-password"
-                    name="confirm-password"
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    autoComplete="new-password"
-                    className="form-control"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    dir="ltr"
-                    style={{ textAlign: 'left', paddingRight: '38px' }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword((prev) => !prev)}
-                    aria-label={showConfirmPassword ? 'הסתר סיסמה' : 'הצג סיסמה'}
-                    title={showConfirmPassword ? 'הסתר סיסמה' : 'הצג סיסמה'}
-                    style={eyeButtonStyle}
-                  >
-                    <EyeIcon open={showConfirmPassword} />
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {selectedRole === 'Owner' && (
-              <div
-                className="form-group"
-                style={{
-                  background: 'var(--ev-bg)',
-                  padding: '12px 14px',
-                  borderRadius: '9px',
-                  border: '1px solid var(--ev-border)',
-                }}
-              >
-                <label
-                  style={{
-                    fontWeight: 500,
-                    margin: 0,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    cursor: 'pointer',
-                    fontSize: '0.86rem',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={hasStation}
-                    onChange={(e) => setHasStation(e.target.checked)}
-                  />
-                  <span>קיימת לי כבר תחנה רשומה במערכת</span>
-                </label>
-              </div>
-            )}
-
-            <button type="submit" className="btn" disabled={loading} style={{ marginTop: '6px' }}>
-              {loading
-                ? 'מתחבר לשרת...'
-                : authMode === 'login'
-                  ? 'כניסה למערכת'
-                  : 'יצירת חשבון והמשך'}
+          {mode === 'forgot' && (
+            <button
+              type="button"
+              className="auth-text-button"
+              disabled={busy}
+              onClick={() => changeMode('login')}
+            >
+              חזרה להתחברות
             </button>
-          </form>
-        )}
-      </div>
+          )}
+
+          {mode === 'forgot' && forgotStep === 'reset' && (
+            <button
+              type="button"
+              className="auth-text-button"
+              disabled={busy}
+              onClick={() => changeMode('forgot')}
+            >
+              בקשת קוד חדש
+            </button>
+          )}
+
+        </form>
+
+        <div className="auth-security">
+          <ShieldCheck size={17} />
+          הגישה לחשבון מוגנת באמצעות אימות משתמשים
+        </div>
+
+      </section>
+
     </div>
   );
 }

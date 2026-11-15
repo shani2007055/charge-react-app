@@ -1,16 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { MapPin } from 'lucide-react';
 import { apiFetch } from '../api/apiClient';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import type { Station } from '../store/stations/stationsState';
 import { fetchStations } from '../store/stations/stationsThunks';
+import type { Vehicle } from '../types/Vehicle';
 import StationsMap, { type MapStationItem } from './StationsMap';
-
-interface VehicleDto {
-  id: number;
-  model: string;
-  currentBattery: number;
-}
+import PageHeader from './ui/PageHeader';
+import StationMetrics from './ui/StationMetrics';
+import StationNavigation from './ui/StationNavigation';
+import './ui/DriverDashboard.css';
 
 interface BookingStatusOnly {
   status: string;
@@ -60,10 +60,10 @@ export default function StationResultsScreen() {
     currentBatteryPercent,
     targetBatteryPercent,
     driverLocation,
+    selectedVehicleId,
     loading,
     error,
   } = useAppSelector((state) => state.stations);
-  const { carModel } = useAppSelector((state) => state.user);
 
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [hasActiveBooking, setHasActiveBooking] = useState<boolean>(false);
@@ -74,7 +74,7 @@ export default function StationResultsScreen() {
 
   useEffect(() => {
     if (!hasSearched) {
-      dispatch(fetchStations());
+      void dispatch(fetchStations());
     }
 
     async function checkActiveBooking() {
@@ -85,7 +85,7 @@ export default function StationResultsScreen() {
         // המשתמש אינו נהג
       }
     }
-    checkActiveBooking();
+    void checkActiveBooking();
   }, [dispatch, hasSearched]);
 
   const handleReserveStation = useCallback(
@@ -94,23 +94,37 @@ export default function StationResultsScreen() {
       setReservingId(station.id);
 
       try {
-        let vehicles = await apiFetch<VehicleDto[]>('/UsersVehicles/my');
-        if (vehicles.length === 0) {
-          const createdVehicle = await apiFetch<VehicleDto>('/UsersVehicles', {
-            method: 'POST',
-            body: JSON.stringify({
-              model: carModel || 'Tesla Model 3',
-              batteryCapacityKwh: 75,
-              currentBattery: currentBatteryPercent,
-              supportedChargerType: station.chargerType || 'CCS',
-            }),
-          });
-          vehicles = [createdVehicle];
+        const vehicles = await apiFetch<Vehicle[]>('/UsersVehicles/my');
+        const vehicle = vehicles.find((v) => v.id === selectedVehicleId);
+
+        if (!vehicle) {
+          throw new Error('יש לחזור למסך החיפוש ולבחור רכב רשום לפני השריון.');
         }
 
-        const vehicle = vehicles[0];
-        const currentBattery = Math.min(currentBatteryPercent, 95);
-        const targetBattery = Math.max(targetBatteryPercent, currentBattery + 1);
+        if (!station.isActive) {
+          throw new Error('העמדה אינה פעילה כרגע.');
+        }
+
+        if (
+          vehicle.supportedChargerType.trim().toLowerCase() !==
+          station.chargerType.trim().toLowerCase()
+        ) {
+          throw new Error('סוג מחבר העמדה אינו תואם למחבר הרכב הנבחר.');
+        }
+
+        const currentBattery = currentBatteryPercent;
+        const targetBattery = targetBatteryPercent;
+
+        if (
+          !Number.isFinite(currentBattery) ||
+          !Number.isFinite(targetBattery) ||
+          currentBattery < 0 ||
+          currentBattery >= 100 ||
+          targetBattery <= currentBattery ||
+          targetBattery > 100
+        ) {
+          throw new Error('נתוני הסוללה אינם תקינים.');
+        }
 
         const distanceKm =
           typeof explicitDistanceKm === 'number'
@@ -137,7 +151,6 @@ export default function StationResultsScreen() {
             estimatedArrivalTime: arrivalTime,
           }),
         });
-
         navigate('/active');
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'שגיאה בשריון העמדה';
@@ -153,7 +166,7 @@ export default function StationResultsScreen() {
         setReservingId(null);
       }
     },
-    [carModel, currentBatteryPercent, targetBatteryPercent, driverLocation, navigate]
+    [selectedVehicleId, currentBatteryPercent, targetBatteryPercent, driverLocation, navigate]
   );
 
   const matchesQuickFilter = useCallback(
@@ -241,7 +254,17 @@ export default function StationResultsScreen() {
   const canRenderMap = showMap && (mapStations.length > 0 || driverLocation !== null);
 
   return (
-    <div className="container" dir="rtl" style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+    <div className="dash-page" dir="rtl">
+      <PageHeader
+        title="עמדות טעינה"
+        description={
+          hasSearched
+            ? 'עמדות טעינה המותאמות לנתוני החיפוש שלך'
+            : 'גלו את עמדות הטעינה הזמינות במערכת'
+        }
+        icon={MapPin}
+      />
+
       {/* סרגל פעולות ופילטרים מהירים */}
       <div
         className="ev-card"
@@ -262,6 +285,7 @@ export default function StationResultsScreen() {
           >
             חזרה לחיפוש
           </button>
+
           <div>
             <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--ev-ink)' }}>
               {hasSearched ? 'המלצות מותאמות אישית' : 'כל עמדות הטעינה במערכת'}
@@ -360,9 +384,9 @@ export default function StationResultsScreen() {
       )}
 
       {/* פריסת Split-View: רשימת עמדות + מפה בהירה */}
-      <div className={`ev-results-split ${canRenderMap ? 'with-map' : ''}`}>
+      <div className={`results-grid ${canRenderMap ? 'has-map' : ''}`}>
         {/* רשימת עמדות */}
-        <div className="ev-results-list">
+        <div className="results-list">
           {hasSearched ? (
             filteredRecommendations.length === 0 ? (
               <div className="ev-card" style={{ textAlign: 'center', padding: '32px' }}>
@@ -386,7 +410,7 @@ export default function StationResultsScreen() {
                 return (
                   <div
                     key={rec.station.id}
-                    className="ev-card"
+                    className="ev-card station-result-card"
                     style={{
                       padding: '18px 20px',
                       borderColor: isSelected
@@ -418,11 +442,7 @@ export default function StationResultsScreen() {
                         </h3>
                         <div
                           className="tabular-nums"
-                          style={{
-                            fontSize: '0.82rem',
-                            color: 'var(--ev-ink-muted)',
-                            marginTop: '4px',
-                          }}
+                          style={{ fontSize: '0.82rem', color: 'var(--ev-ink-muted)', marginTop: '4px' }}
                         >
                           {rec.station.address} · {rec.distanceKm} ק&quot;מ ממך · הגעה משוערת ~
                           {eta.travelMinutes} דק&apos; (+{eta.bufferMinutes} דק&apos; מרווח)
@@ -459,6 +479,12 @@ export default function StationResultsScreen() {
                     >
                       {rec.matchReason}
                     </p>
+
+                    <StationMetrics station={rec.station} />
+                    <StationNavigation
+                      latitude={rec.station.latitude}
+                      longitude={rec.station.longitude}
+                    />
 
                     <div
                       style={{
@@ -534,12 +560,12 @@ export default function StationResultsScreen() {
                   )
                 : null;
               const eta = estimateReservationWindow(distKm);
+
               return (
                 <div
                   key={station.id}
-                  className="ev-card"
+                  className="ev-card station-result-card"
                   style={{
-                    padding: '18px 20px',
                     borderColor: isSelected ? 'var(--ev-brand)' : undefined,
                   }}
                 >
@@ -570,6 +596,7 @@ export default function StationResultsScreen() {
                         {distKm !== null && ` · ${distKm} ק"מ ממך (הגעה ~${eta.travelMinutes} דק')`}
                       </div>
                     </div>
+
                     <span
                       style={{
                         fontSize: '0.78rem',
@@ -580,6 +607,13 @@ export default function StationResultsScreen() {
                       {station.currentStatus ?? (station.isActive ? 'זמינה' : 'לא פעילה')}
                     </span>
                   </div>
+
+                  <StationMetrics station={station} />
+                  <StationNavigation
+                    latitude={station.latitude}
+                    longitude={station.longitude}
+                  />
+
                   <div
                     style={{
                       marginTop: '14px',
@@ -600,6 +634,7 @@ export default function StationResultsScreen() {
                       דירוג {station.averageRating !== null ? station.averageRating.toFixed(1) : 'חדשה'} (
                       {station.reviewsCount})
                     </span>
+
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <button
                         type="button"
@@ -630,7 +665,7 @@ export default function StationResultsScreen() {
 
         {/* מפה בהירה */}
         {canRenderMap && (
-          <div className="ev-map-card">
+          <div className="ev-card results-map-panel">
             <StationsMap
               stations={mapStations}
               driverLocation={driverLocation}

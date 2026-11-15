@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../api/apiClient';
+import PageHeader from './ui/PageHeader';
+import StatusBadge from './ui/StatusBadge';
+import { BatteryCharging } from 'lucide-react';
+import './ui/DriverDashboard.css';
 
 interface ChargeBooking {
   id: number;
@@ -146,26 +150,26 @@ export default function ActiveSessionScreen() {
     : -1;
 
   return (
-    <div className="container" dir="rtl">
-      <div className="ev-card" style={{ maxWidth: '680px', margin: '0 auto', padding: '28px' }}>
-        <div className="screen-header">
-          <div>
-            <div>ניווט ושריון עמדה בזמן אמת</div>
-            <p className="ev-subtitle">מעקב הגעה, התחלת טעינה וסיום מסודר</p>
-          </div>
-          {booking && (
-            <span
-              className="font-mono-num"
-              style={{
-                fontSize: '0.82rem',
-                fontWeight: 600,
-                color: 'var(--ev-brand)',
-              }}
-            >
+  <div className="dash-page" dir="rtl">
+
+    <PageHeader
+      title="הטעינה שלי"
+      description="מעקב אחר השריון, ההגעה ומצב הטעינה"
+      icon={BatteryCharging}
+      actions={
+        booking && (
+          <>
+            <span className="ev-badge ev-badge-brand">
               הזמנה #{booking.id}
             </span>
-          )}
-        </div>
+
+            <StatusBadge status={booking.status} />
+          </>
+        )
+      }
+    />
+
+    <div className="ev-card driver-session-content">
 
         {error && <div className="ev-alert-error">{error}</div>}
 

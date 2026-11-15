@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../api/apiClient';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { logout, updateUserName } from '../store/user/userSlice';
+import PageHeader from './ui/PageHeader';
+import { UserRound } from 'lucide-react';
+import './ui/DriverDashboard.css';
 
 interface UserClaim {
   type: string;
@@ -394,22 +397,22 @@ export default function UserProfileScreen() {
   };
 
   return (
-    <div className="container" dir="rtl">
-      <div className="screen-view" style={{ maxWidth: '760px', margin: '0 auto' }}>
-        <div className="screen-header">
-          <div>
-            <h1 style={{ margin: 0, fontSize: '1.35rem', color: 'var(--ev-ink)' }}>
-              פרופיל משתמש וניהול רכבים
-            </h1>
-            <p style={{ margin: '4px 0 0', fontSize: '0.88rem', color: 'var(--ev-ink-muted)' }}>
-              עדכון פרטים אישיים, סיסמה ונתוני הסוללה של הרכבים שלך
-            </p>
-          </div>
-          <span className="ev-badge ev-badge-brand">
-            {role === 'Owner' ? 'בעל עמדה' : 'נהג'}
-          </span>
-        </div>
+  <div className="dash-page" dir="rtl">
 
+    <PageHeader
+      title="הפרופיל שלי"
+      description="ניהול פרטים אישיים, אבטחת החשבון והרכבים שלי"
+      icon={UserRound}
+      actions={
+        <span className="ev-badge ev-badge-brand">
+          {role === 'Owner'
+            ? 'בעל עמדה'
+            : 'נהג'}
+        </span>
+      }
+    />
+
+    <div className="driver-profile-content screen-view">
         {loading && (
           <div style={{ textAlign: 'center', color: 'var(--ev-ink-muted)', padding: '28px' }}>
             טוען פרטי פרופיל...
