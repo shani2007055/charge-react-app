@@ -22,12 +22,18 @@ export interface RankedStationResult {
   isEmergencyMode: boolean;
 }
 
+export interface DriverCoords {
+  lat: number;
+  lng: number;
+}
+
 export interface StationsState {
   items: Station[];
   recommendations: RankedStationResult[];
   hasSearched: boolean;
   currentBatteryPercent: number;
   targetBatteryPercent: number;
+  driverLocation: DriverCoords | null;
   loading: boolean;
   error: string | null;
 }
@@ -38,6 +44,7 @@ export const initialState: StationsState = {
   hasSearched: false,
   currentBatteryPercent: 50,
   targetBatteryPercent: 80,
+  driverLocation: null,
   loading: false,
   error: null,
 };

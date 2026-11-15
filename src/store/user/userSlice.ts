@@ -7,6 +7,17 @@ const saveSession = (id: number | null, name: string, email: string, role: strin
   localStorage.setItem('user_session', JSON.stringify({ id, name, email, role }));
 };
 
+const clearUserFields = (state: typeof initialState) => {
+  state.id = null;
+  state.name = 'אורח';
+  state.email = '';
+  state.role = 'Driver';
+  state.token = null;
+  state.error = null;
+  localStorage.removeItem('token');
+  localStorage.removeItem('user_session');
+};
+
 const userSlice = createSlice({
   name: 'user',
   initialState,
@@ -18,14 +29,15 @@ const userSlice = createSlice({
       saveSession(state.id, state.name, state.email, state.role);
     },
     logout: (state) => {
-      state.id = null;
-      state.name = 'אורח';
-      state.email = '';
-      state.role = 'Driver';
-      state.token = null;
-      state.error = null;
-      localStorage.removeItem('token');
-      localStorage.removeItem('user_session');
+      clearUserFields(state);
+      state.sessionExpiredMessage = null;
+    },
+    expireSession: (state) => {
+      clearUserFields(state);
+      state.sessionExpiredMessage = 'פג תוקף ההתחברות למערכת. יש להתחבר מחדש כדי להמשיך.';
+    },
+    clearSessionExpiredMessage: (state) => {
+      state.sessionExpiredMessage = null;
     },
   },
   extraReducers: (builder) => {
@@ -34,6 +46,7 @@ const userSlice = createSlice({
       .addCase(loginUser.pending, (state) => {
         state.loading = true;
         state.error = null;
+        state.sessionExpiredMessage = null;
       })
       .addCase(loginUser.fulfilled, (state, action) => {
         state.loading = false;
@@ -42,6 +55,7 @@ const userSlice = createSlice({
         state.email = action.payload.email;
         state.role = action.payload.role;
         state.token = action.payload.token;
+        state.sessionExpiredMessage = null;
         saveSession(action.payload.id, action.payload.name, action.payload.email, action.payload.role);
       })
       .addCase(loginUser.rejected, (state, action) => {
@@ -52,6 +66,7 @@ const userSlice = createSlice({
       .addCase(registerUser.pending, (state) => {
         state.loading = true;
         state.error = null;
+        state.sessionExpiredMessage = null;
       })
       .addCase(registerUser.fulfilled, (state, action) => {
         state.loading = false;
@@ -60,6 +75,7 @@ const userSlice = createSlice({
         state.email = action.payload.email;
         state.role = action.payload.role;
         state.token = action.payload.token;
+        state.sessionExpiredMessage = null;
         saveSession(action.payload.id, action.payload.name, action.payload.email, action.payload.role);
       })
       .addCase(registerUser.rejected, (state, action) => {
@@ -69,5 +85,13 @@ const userSlice = createSlice({
   },
 });
 
-export const { setCarModel, addCommunityPoints, updateUserName, logout } = userSlice.actions;
+export const {
+  setCarModel,
+  addCommunityPoints,
+  updateUserName,
+  logout,
+  expireSession,
+  clearSessionExpiredMessage,
+} = userSlice.actions;
+
 export default userSlice.reducer;

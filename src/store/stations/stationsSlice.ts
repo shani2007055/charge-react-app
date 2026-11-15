@@ -1,5 +1,5 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import { initialState } from './stationsState';
+import { initialState, type DriverCoords } from './stationsState';
 import { fetchStations, recommendStations } from './stationsThunks';
 
 const stationsSlice = createSlice({
@@ -16,6 +16,9 @@ const stationsSlice = createSlice({
     ) => {
       state.currentBatteryPercent = action.payload.currentBatteryPercent;
       state.targetBatteryPercent = action.payload.targetBatteryPercent;
+    },
+    setDriverLocation: (state, action: PayloadAction<DriverCoords | null>) => {
+      state.driverLocation = action.payload;
     },
   },
   extraReducers: (builder) => {
@@ -49,5 +52,5 @@ const stationsSlice = createSlice({
   },
 });
 
-export const { clearSearch, setSearchBattery } = stationsSlice.actions;
+export const { clearSearch, setSearchBattery, setDriverLocation } = stationsSlice.actions;
 export default stationsSlice.reducer;

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { Navigate, Outlet, Route, Routes, useNavigate } from 'react-router-dom';
 import LoginScreen from './components/LoginScreen';
 import DriverSearchScreen from './components/DriverSearchScreen';
@@ -7,8 +7,9 @@ import ActiveSessionScreen from './components/ActiveSessionScreen';
 import RatingAndReportScreen from './components/RatingAndReportScreen';
 import UserProfileScreen from './components/UserProfileScreen';
 import StationOwnerScreen from './components/StationOwnerScreen';
+import VoiceAgentWidget from './components/VoiceAgentWidget';
 import { useAppDispatch, useAppSelector } from './store/hooks';
-import { logout } from './store/user/userSlice';
+import { expireSession, logout } from './store/user/userSlice';
 import './App.css';
 
 // רכיב הגנה: מי שלא מחובר עם Token מוחזר אוטומטית למסך ההתחברות
@@ -24,8 +25,17 @@ function Layout() {
   const { token, role, name } = useAppSelector((state) => state.user);
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-
   const homePath = role === 'Owner' ? '/owner' : '/search';
+
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      dispatch(expireSession());
+      navigate('/', { replace: true });
+    };
+
+    window.addEventListener('auth:expired', handleSessionExpired);
+    return () => window.removeEventListener('auth:expired', handleSessionExpired);
+  }, [dispatch, navigate]);
 
   return (
     <div className="container" dir="rtl">
@@ -68,6 +78,8 @@ function Layout() {
       <main>
         <Outlet />
       </main>
+
+      {token && <VoiceAgentWidget />}
     </div>
   );
 }

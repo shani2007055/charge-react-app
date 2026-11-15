@@ -1,10 +1,37 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL;
 
+const AUTH_EXEMPT_ENDPOINTS = ['/users/login', '/users/register'];
+
+export function isTokenExpired(token: string): boolean {
+  try {
+    const payloadBase64 = token.split('.')[1];
+    if (!payloadBase64) return true;
+    const base64 = payloadBase64.replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(base64)) as { exp?: number };
+    if (typeof payload.exp !== 'number') return false;
+    return Date.now() >= payload.exp * 1000;
+  } catch {
+    return true;
+  }
+}
+
+export function triggerSessionExpired(): void {
+  localStorage.removeItem('token');
+  localStorage.removeItem('user_session');
+  window.dispatchEvent(new CustomEvent('auth:expired'));
+}
+
 export async function apiFetch<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
   const token = localStorage.getItem('token');
+  const isAuthEndpoint = AUTH_EXEMPT_ENDPOINTS.some((path) => endpoint.startsWith(path));
+
+  if (token && !isAuthEndpoint && isTokenExpired(token)) {
+    triggerSessionExpired();
+    throw new Error('פג תוקף ההתחברות למערכת. יש להתחבר מחדש.');
+  }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -20,6 +47,11 @@ export async function apiFetch<T>(
     ...options,
     headers,
   });
+
+  if (response.status === 401 && !isAuthEndpoint) {
+    triggerSessionExpired();
+    throw new Error('פג תוקף ההתחברות למערכת. יש להתחבר מחדש.');
+  }
 
   if (!response.ok) {
     const errorText = await response.text();

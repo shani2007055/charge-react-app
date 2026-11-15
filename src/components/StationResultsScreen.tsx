@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from '../store/hooks';
 import { fetchStations } from '../store/stations/stationsThunks';
 import { apiFetch } from '../api/apiClient';
 import type { Station } from '../store/stations/stationsState';
+import StationsMap, { type MapStationItem } from './StationsMap';
 
 interface VehicleDto {
   id: number;
@@ -20,12 +21,14 @@ const ACTIVE_STATUSES = ['Held', 'Confirmed', 'Charging'];
 export default function StationResultsScreen() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
-  const { items, recommendations, hasSearched, currentBatteryPercent, targetBatteryPercent, loading, error } =
+  const { items, recommendations, hasSearched, currentBatteryPercent, targetBatteryPercent, driverLocation, loading, error } =
     useAppSelector((state) => state.stations);
   const { carModel } = useAppSelector((state) => state.user);
+
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [hasActiveBooking, setHasActiveBooking] = useState<boolean>(false);
   const [reservingId, setReservingId] = useState<number | null>(null);
+  const [showMap, setShowMap] = useState<boolean>(true);
 
   useEffect(() => {
     if (!hasSearched) {
@@ -40,60 +43,73 @@ export default function StationResultsScreen() {
         // המשתמש אינו נהג
       }
     }
-
     checkActiveBooking();
   }, [dispatch, hasSearched]);
 
-  async function handleReserveStation(station: Station) {
-    setBookingError(null);
-    setReservingId(station.id);
+  const handleReserveStation = useCallback(
+    async (station: Station) => {
+      setBookingError(null);
+      setReservingId(station.id);
 
-    try {
-      let vehicles = await apiFetch<VehicleDto[]>('/UsersVehicles/my');
-      if (vehicles.length === 0) {
-        const createdVehicle = await apiFetch<VehicleDto>('/UsersVehicles', {
+      try {
+        let vehicles = await apiFetch<VehicleDto[]>('/UsersVehicles/my');
+        if (vehicles.length === 0) {
+          const createdVehicle = await apiFetch<VehicleDto>('/UsersVehicles', {
+            method: 'POST',
+            body: JSON.stringify({
+              model: carModel || 'Tesla Model 3',
+              batteryCapacityKwh: 75,
+              currentBattery: currentBatteryPercent,
+              supportedChargerType: station.chargerType || 'CCS',
+            }),
+          });
+          vehicles = [createdVehicle];
+        }
+
+        const vehicle = vehicles[0];
+        const currentBattery = Math.min(currentBatteryPercent, 95);
+        const targetBattery = Math.max(targetBatteryPercent, currentBattery + 1);
+        const arrivalTime = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+        await apiFetch('/ChargeBooking', {
           method: 'POST',
           body: JSON.stringify({
-            model: carModel || 'Tesla Model 3',
-            batteryCapacityKwh: 75,
-            currentBattery: currentBatteryPercent,
-            supportedChargerType: station.chargerType || 'CCS',
+            stationId: station.id,
+            vehicleId: vehicle.id,
+            currentBatteryPercent: currentBattery,
+            targetBatteryPercent: targetBattery,
+            estimatedArrivalTime: arrivalTime,
           }),
         });
-        vehicles = [createdVehicle];
+
+        navigate('/active');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'שגיאה בשריון העמדה';
+        if (msg.includes('הזמנה פעילה')) {
+          setHasActiveBooking(true);
+        }
+        setBookingError(
+          msg.includes('403')
+            ? 'כדי לשריין עמדה צריך להתחבר ממסך הכניסה בתפקיד נהג (Driver).'
+            : msg
+        );
+      } finally {
+        setReservingId(null);
       }
+    },
+    [carModel, currentBatteryPercent, targetBatteryPercent, navigate]
+  );
 
-      const vehicle = vehicles[0];
-      const currentBattery = Math.min(currentBatteryPercent, 95);
-      const targetBattery = Math.max(targetBatteryPercent, currentBattery + 1);
-      const arrivalTime = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-
-      await apiFetch('/ChargeBooking', {
-        method: 'POST',
-        body: JSON.stringify({
-          stationId: station.id,
-          vehicleId: vehicle.id,
-          currentBatteryPercent: currentBattery,
-          targetBatteryPercent: targetBattery,
-          estimatedArrivalTime: arrivalTime,
-        }),
-      });
-
-      navigate('/active');
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'שגיאה בשריון העמדה';
-      if (msg.includes('הזמנה פעילה')) {
-        setHasActiveBooking(true);
-      }
-      setBookingError(
-        msg.includes('403')
-          ? 'כדי לשריין עמדה צריך להתחבר ממסך הכניסה בתפקיד נהג (Driver).'
-          : msg
-      );
-    } finally {
-      setReservingId(null);
+  const mapStations = useMemo<MapStationItem[]>(() => {
+    if (hasSearched) {
+      return recommendations.map((rec) => ({
+        station: rec.station,
+        distanceKm: rec.distanceKm,
+        matchPercentage: rec.matchPercentage,
+      }));
     }
-  }
+    return items.map((station) => ({ station }));
+  }, [hasSearched, recommendations, items]);
 
   if (loading) {
     return (
@@ -124,8 +140,8 @@ export default function StationResultsScreen() {
           </span>
         </div>
 
-        <div style={{ maxWidth: '650px', margin: '0 auto', color: 'white' }}>
-          <div style={{ marginBottom: '15px' }}>
+        <div style={{ maxWidth: '750px', margin: '0 auto', color: 'white' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '15px' }}>
             <button
               type="button"
               className="btn"
@@ -134,7 +150,28 @@ export default function StationResultsScreen() {
             >
               ← חזרה לחיפוש
             </button>
+
+            {mapStations.length > 0 && (
+              <button
+                type="button"
+                className="btn"
+                style={{ width: 'auto', padding: '6px 14px', fontSize: '0.85rem', background: '#0f172a', border: '1px solid #334155', cursor: 'pointer' }}
+                onClick={() => setShowMap((prev) => !prev)}
+              >
+                {showMap ? '📋 הסתר מפה' : '🗺️ הצג מפה'}
+              </button>
+            )}
           </div>
+
+          {showMap && mapStations.length > 0 && (
+            <StationsMap
+              stations={mapStations}
+              driverLocation={driverLocation}
+              hasActiveBooking={hasActiveBooking}
+              reservingId={reservingId}
+              onReserve={(station) => void handleReserveStation(station)}
+            />
+          )}
 
           {hasActiveBooking && (
             <div style={{ background: '#1e3a8a', border: '1px solid #3b82f6', color: 'white', padding: '12px', borderRadius: '8px', marginBottom: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
@@ -208,11 +245,12 @@ export default function StationResultsScreen() {
                     <p style={{ margin: '0 0 10px 0', fontSize: '0.85rem', color: '#85e02c' }}>
                       💡 {rec.matchReason}
                     </p>
+
                     <button
                       type="button"
                       className="btn"
                       disabled={reservingId === rec.station.id || hasActiveBooking}
-                      onClick={() => handleReserveStation(rec.station)}
+                      onClick={() => void handleReserveStation(rec.station)}
                       style={{ cursor: hasActiveBooking ? 'not-allowed' : 'pointer', opacity: hasActiveBooking ? 0.5 : 1 }}
                     >
                       {reservingId === rec.station.id ? 'משריין עמדה...' : '⚡ שריין עמדה זו (15 דקות)'}
@@ -248,11 +286,12 @@ export default function StationResultsScreen() {
                     <span>⭐ {station.averageRating !== null ? station.averageRating.toFixed(1) : 'ללא דירוג'} ({station.reviewsCount})</span>
                     <span>📌 {station.currentStatus ?? (station.isActive ? 'זמינה' : 'לא פעילה')}</span>
                   </div>
+
                   <button
                     type="button"
                     className="btn"
                     disabled={!station.isActive || reservingId === station.id || hasActiveBooking}
-                    onClick={() => handleReserveStation(station)}
+                    onClick={() => void handleReserveStation(station)}
                     style={{ cursor: hasActiveBooking ? 'not-allowed' : 'pointer', opacity: hasActiveBooking ? 0.5 : 1 }}
                   >
                     {reservingId === station.id ? 'משריין עמדה...' : '⚡ שריין עמדה זו (15 דקות)'}

@@ -1,3 +1,5 @@
+import { isTokenExpired } from '../../api/apiClient';
+
 export type UserRole = 'Driver' | 'Owner';
 
 export interface UserState {
@@ -10,6 +12,7 @@ export interface UserState {
   communityPoints: number;
   loading: boolean;
   error: string | null;
+  sessionExpiredMessage: string | null;
 }
 
 interface StoredUserSession {
@@ -37,7 +40,15 @@ function loadStoredSession(): StoredUserSession {
   return { id: null, name: 'אורח', email: '', role: 'Driver' };
 }
 
-const savedToken = localStorage.getItem('token');
+const rawToken = localStorage.getItem('token');
+const hasExpiredOnLoad = Boolean(rawToken && isTokenExpired(rawToken));
+
+if (hasExpiredOnLoad) {
+  localStorage.removeItem('token');
+  localStorage.removeItem('user_session');
+}
+
+const savedToken = hasExpiredOnLoad ? null : rawToken;
 const savedSession = savedToken
   ? loadStoredSession()
   : { id: null, name: 'אורח', email: '', role: 'Driver' as UserRole };
@@ -52,4 +63,7 @@ export const initialState: UserState = {
   communityPoints: 150,
   loading: false,
   error: null,
+  sessionExpiredMessage: hasExpiredOnLoad
+    ? 'פג תוקף ההתחברות למערכת. יש להתחבר מחדש כדי להמשיך.'
+    : null,
 };

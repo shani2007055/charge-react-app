@@ -1,12 +1,49 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { fetchStations, recommendStations } from '../store/stations/stationsThunks';
-import { setSearchBattery } from '../store/stations/stationsSlice';
+import { setDriverLocation, setSearchBattery } from '../store/stations/stationsSlice';
+
+interface NominatimAddress {
+  road?: string;
+  house_number?: string;
+  city?: string;
+  town?: string;
+  village?: string;
+  municipality?: string;
+}
 
 interface NominatimResult {
+  place_id: number;
+  name?: string;
+  display_name: string;
   lat: string;
   lon: string;
+  address?: NominatimAddress;
+}
+
+interface CleanSuggestion {
+  id: number;
+  label: string;
+  lat: number;
+  lng: number;
+}
+
+function formatCleanAddress(item: NominatimResult): string {
+  const addr = item.address;
+  const street = addr?.road
+    ? `${addr.road}${addr.house_number ? ` ${addr.house_number}` : ''}`
+    : '';
+  const city = addr?.city || addr?.town || addr?.village || addr?.municipality || '';
+  const placeName =
+    item.name && item.name !== addr?.road && item.name !== city ? item.name : '';
+
+  const parts = [placeName, street, city].filter(Boolean);
+  if (parts.length > 0) {
+    return parts.join(', ');
+  }
+
+  return item.display_name.split(',').slice(0, 2).map((p) => p.trim()).join(', ');
 }
 
 export default function DriverSearchScreen() {
@@ -18,6 +55,8 @@ export default function DriverSearchScreen() {
 
   const [locationText, setLocationText] = useState<string>('תל אביב');
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [suggestions, setSuggestions] = useState<CleanSuggestion[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState<boolean>(false);
   const [detectingLocation, setDetectingLocation] = useState<boolean>(false);
   const [searchingLocation, setSearchingLocation] = useState<boolean>(false);
 
@@ -26,17 +65,83 @@ export default function DriverSearchScreen() {
   const [priority, setPriority] = useState<string>('balanced');
   const [errorMessage, setErrorMessage] = useState<string>('');
 
+  // מונע פתיחה חוזרת של רשימת ההצעות מיד אחרי בחירה או זיהוי GPS
+  const skipNextAutocompleteRef = useRef<boolean>(true);
+
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const { loading } = useAppSelector((state) => state.stations);
 
   const isBusy = loading || searchingLocation;
 
+  // השלמת כתובות אוטומטית נקייה עם Debounce וסינון כפילויות
+  useEffect(() => {
+    if (skipNextAutocompleteRef.current) {
+      skipNextAutocompleteRef.current = false;
+      return;
+    }
+
+    const query = locationText.trim();
+    if (query.length < 3 || gpsCoords !== null) {
+      setSuggestions([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timerId = window.setTimeout(async () => {
+      setLoadingSuggestions(true);
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=il&accept-language=he&limit=8&q=${encodeURIComponent(query)}`,
+          { signal: controller.signal }
+        );
+        if (res.ok) {
+          const data = (await res.json()) as NominatimResult[];
+          const seen = new Set<string>();
+          const cleaned: CleanSuggestion[] = [];
+
+          for (const item of data) {
+            const label = formatCleanAddress(item);
+            if (!seen.has(label)) {
+              seen.add(label);
+              cleaned.push({
+                id: item.place_id,
+                label,
+                lat: Number(item.lat),
+                lng: Number(item.lon),
+              });
+            }
+            if (cleaned.length >= 5) break;
+          }
+
+          setSuggestions(cleaned);
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return;
+        setSuggestions([]);
+      } finally {
+        setLoadingSuggestions(false);
+      }
+    }, 400);
+
+    return () => {
+      window.clearTimeout(timerId);
+      controller.abort();
+    };
+  }, [locationText, gpsCoords]);
+
+  const handleSelectSuggestion = (item: CleanSuggestion) => {
+    skipNextAutocompleteRef.current = true;
+    setLocationText(item.label);
+    setGpsCoords({ lat: item.lat, lng: item.lng });
+    setSuggestions([]);
+    setErrorMessage('');
+  };
+
   const handleBatteryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = Number(e.target.value);
     setBatteryLevel(val);
     setEstimatedRange(`כ-${Math.round(val * 3)} ק"מ`);
-
     if (val <= 10) {
       setBatteryStatusText(`מצב חירום! סוללה קריטית (${val}%)`);
       setBatteryColor('var(--danger)');
@@ -51,6 +156,7 @@ export default function DriverSearchScreen() {
 
   function handleDetectLocation() {
     setErrorMessage('');
+    setSuggestions([]);
     if (!navigator.geolocation) {
       setErrorMessage('הדפדפן שלך אינו תומך בזיהוי מיקום.');
       return;
@@ -61,6 +167,7 @@ export default function DriverSearchScreen() {
       async (position) => {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
+        skipNextAutocompleteRef.current = true;
         setGpsCoords({ lat, lng });
 
         try {
@@ -70,9 +177,14 @@ export default function DriverSearchScreen() {
           if (res.ok) {
             const data = (await res.json()) as {
               display_name?: string;
-              address?: { road?: string; house_number?: string; city?: string; town?: string; village?: string };
+              address?: NominatimAddress;
             };
-            const cityName = data.address?.city || data.address?.town || data.address?.village || '';
+            const cityName =
+              data.address?.city ||
+              data.address?.town ||
+              data.address?.village ||
+              data.address?.municipality ||
+              '';
             const road = data.address?.road
               ? `${data.address.road}${data.address.house_number ? ' ' + data.address.house_number : ''}`
               : '';
@@ -137,6 +249,7 @@ export default function DriverSearchScreen() {
 
   async function runRecommendation(overrideBattery?: number) {
     setErrorMessage('');
+    setSuggestions([]);
     const actualBattery = overrideBattery ?? batteryLevel;
     const safeTarget = Math.max(targetBattery, Math.min(actualBattery + 10, 100));
     dispatch(setSearchBattery({ currentBatteryPercent: actualBattery, targetBatteryPercent: safeTarget }));
@@ -144,6 +257,7 @@ export default function DriverSearchScreen() {
     try {
       setSearchingLocation(true);
       const coords = await resolveCoordinates();
+      dispatch(setDriverLocation(coords));
       const weights = getWeightsByPriority(priority);
 
       await dispatch(
@@ -173,8 +287,10 @@ export default function DriverSearchScreen() {
 
   async function handleShowAllStations() {
     setErrorMessage('');
+    setSuggestions([]);
     const safeTarget = Math.max(targetBattery, Math.min(batteryLevel + 10, 100));
     dispatch(setSearchBattery({ currentBatteryPercent: batteryLevel, targetBatteryPercent: safeTarget }));
+    dispatch(setDriverLocation(gpsCoords));
 
     try {
       await dispatch(fetchStations()).unwrap();
@@ -199,13 +315,13 @@ export default function DriverSearchScreen() {
           )}
 
           <form onSubmit={handleSubmit}>
-            <div className="form-group">
+            <div className="form-group" style={{ position: 'relative' }}>
               <label>📍 מיקום נוכחי או כתובת יעד לתכנון טעינה:</label>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <input
                   type="text"
                   className="form-control"
-                  placeholder="לדוגמה: תל אביב / רוטשילד 50 תל אביב"
+                  placeholder="לדוגמה: רוטשילד 50 פתח תקווה"
                   value={locationText}
                   onChange={(e) => {
                     setLocationText(e.target.value);
@@ -222,6 +338,50 @@ export default function DriverSearchScreen() {
                   {detectingLocation ? 'מאתר...' : '🎯 זהה מיקום'}
                 </button>
               </div>
+
+              {loadingSuggestions && (
+                <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '4px', textAlign: 'right' }}>
+                  מחפש הצעות כתובות...
+                </div>
+              )}
+
+              {suggestions.length > 0 && (
+                <ul
+                  style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    zIndex: 20,
+                    background: '#1e293b',
+                    border: '1px solid #475569',
+                    borderRadius: '8px',
+                    listStyle: 'none',
+                    margin: '4px 0 0 0',
+                    padding: 0,
+                    maxHeight: '220px',
+                    overflowY: 'auto',
+                    boxShadow: '0 8px 20px rgba(0,0,0,0.5)',
+                  }}
+                >
+                  {suggestions.map((item) => (
+                    <li
+                      key={item.id}
+                      onClick={() => handleSelectSuggestion(item)}
+                      style={{
+                        padding: '10px 14px',
+                        fontSize: '0.9rem',
+                        color: 'white',
+                        textAlign: 'right',
+                        cursor: 'pointer',
+                        borderBottom: '1px solid #334155',
+                      }}
+                    >
+                      📍 {item.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
             <div style={{ display: 'flex', gap: '12px' }}>
@@ -236,6 +396,7 @@ export default function DriverSearchScreen() {
                   onChange={handleBatteryChange}
                 />
               </div>
+
               <div className="form-group" style={{ flex: 1 }}>
                 <label>🎯 יעד טעינה רצוי (%):</label>
                 <input
@@ -291,6 +452,7 @@ export default function DriverSearchScreen() {
                   onChange={(e) => setAvailableTimeMinutes(Number(e.target.value))}
                 />
               </div>
+
               <div className="form-group" style={{ flex: 1 }}>
                 <label>🔌 סוג שקע:</label>
                 <select className="form-control" value={chargerType} onChange={(e) => setChargerType(e.target.value)}>
