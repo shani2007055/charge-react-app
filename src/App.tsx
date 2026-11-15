@@ -9,9 +9,7 @@ import {
   NavLink,
   useNavigate
 } from 'react-router-dom';
-
-import { Zap } from 'lucide-react';
-
+import { Zap, Mic } from 'lucide-react';
 import RoleSwitcher from './components/RoleSwitcher';
 import AdminDashboard from './components/admin/AdminDashboard';
 import HomeScreen from './components/HomeScreen';
@@ -221,6 +219,18 @@ function Layout() {
                       <NavLink to="/active">
                         השריון שלי
                       </NavLink>
+                      <button
+  type="button"
+  className="modern-ai-nav"
+  onClick={() => {
+    window.dispatchEvent(
+      new Event('smart-ev:open-assistant')
+    );
+  }}
+>
+  <Mic size={17} />
+  עוזר AI
+</button>
 
                     </>
                   )}

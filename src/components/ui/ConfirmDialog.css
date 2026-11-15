@@ -1,0 +1,161 @@
+
+.smart-dialog {
+  --dialog-accent: #c2410c;
+  --dialog-accent-hover: #9a3412;
+  --dialog-soft: #fff7ed;
+
+  width: min(460px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  box-sizing: border-box;
+  margin: auto;
+  padding: 30px;
+
+  background: #ffffff;
+  color: #0f172a;
+
+  border: 1px solid #e2e8f0;
+  border-radius: 24px;
+
+  box-shadow: 0 25px 80px #0f172a40;
+  font-family: inherit;
+  text-align: right;
+  overflow-y: auto;
+}
+
+.smart-dialog.dialog-danger {
+  --dialog-accent: #dc2626;
+  --dialog-accent-hover: #b91c1c;
+  --dialog-soft: #fef2f2;
+}
+
+.smart-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.60);
+  backdrop-filter: blur(4px);
+}
+
+.smart-dialog[open] {
+  animation: smart-dialog-enter 0.2s ease-out;
+}
+
+.smart-dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 22px;
+}
+
+.smart-dialog-icon {
+  width: 62px;
+  height: 62px;
+  display: grid;
+  place-items: center;
+  border-radius: 17px;
+
+  background: var(--dialog-soft);
+  color: var(--dialog-accent);
+}
+
+.smart-dialog-close {
+  border: 0;
+  background: #f1f5f9;
+  color: #64748b;
+
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+
+  cursor: pointer;
+}
+
+.smart-dialog h2 {
+  margin: 0 0 12px;
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.smart-dialog p {
+  margin: 0;
+  color: #64748b;
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+.smart-dialog-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding-top: 22px;
+  margin-top: 25px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.smart-dialog-actions button {
+  min-height: 46px;
+  border-radius: 11px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 12px;
+  transition: background 0.2s;
+}
+
+.smart-dialog-cancel {
+  border: 1px solid #cbd5e1;
+  background: white;
+  color: #334155;
+}
+
+.smart-dialog-cancel:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.smart-dialog-confirm {
+  border: 1px solid transparent;
+  background: var(--dialog-accent);
+  color: white;
+}
+
+.smart-dialog-confirm:hover:not(:disabled) {
+  background: var(--dialog-accent-hover);
+}
+
+.smart-dialog button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.smart-dialog button:focus-visible {
+  outline: 2px solid var(--dialog-accent);
+  outline-offset: 3px;
+}
+
+@keyframes smart-dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (max-width: 480px) {
+  .smart-dialog {
+    padding: 22px;
+    border-radius: 18px;
+  }
+
+  .smart-dialog h2 {
+    font-size: 21px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .smart-dialog[open] {
+    animation: none;
+  }
+}

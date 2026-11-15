@@ -1,17 +1,93 @@
+
 import { useNavigate } from 'react-router-dom';
+
 import {
   MapPin,
   Zap,
   CalendarCheck,
-  Mic
+  Mic,
+  ArrowLeft
 } from 'lucide-react';
+
+import { useAppSelector } from '../store/hooks';
+import { isAdminToken } from '../store/user/userState';
 
 import './HomeScreen.css';
 
 export default function HomeScreen() {
+
   const navigate = useNavigate();
 
+  const { token, role } = useAppSelector(
+    state => state.user
+  );
+
+  const isAdmin = isAdminToken(token);
+
+  const isDriver =
+    !!token && !isAdmin && role === 'Driver';
+
+  function openFeature(path: string) {
+
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+
+    if (isAdmin) {
+      navigate('/admin');
+      return;
+    }
+
+    if (!isDriver) {
+      navigate('/owner');
+      return;
+    }
+
+    navigate(path);
+  }
+
+  function openAssistant() {
+
+    if (!isDriver) {
+      openFeature('/search');
+      return;
+    }
+
+    window.dispatchEvent(
+      new Event('smart-ev:open-assistant')
+    );
+  }
+
+  const features = [
+    {
+      icon: MapPin,
+      title: 'מיקום חכם',
+      description: 'גלו עמדות טעינה על המפה',
+      action: () => openFeature('/results')
+    },
+    {
+      icon: Zap,
+      title: 'התאמה אישית',
+      description: 'מצאו עמדה המתאימה לרכב שלכם',
+      action: () => openFeature('/search')
+    },
+    {
+      icon: CalendarCheck,
+      title: 'שריון מראש',
+      description: 'מצאו עמדה ושריינו מקום',
+      action: () => openFeature('/search')
+    },
+    {
+      icon: Mic,
+      title: 'עוזר AI',
+      description: 'דברו עם העוזר החכם שלכם',
+      action: openAssistant
+    }
+  ];
+
   return (
+
     <div className="home-page" dir="rtl">
 
       <section className="home-hero">
@@ -34,11 +110,23 @@ export default function HomeScreen() {
           </p>
 
           <button
+            type="button"
             className="home-primary"
-            onClick={() => navigate('/login')}
+            onClick={() => openFeature('/search')}
           >
             מתחילים עכשיו ←
           </button>
+
+          {isDriver && (
+            <button
+              type="button"
+              className="home-ai-button"
+              onClick={openAssistant}
+            >
+              <Mic size={20} />
+              שיחה עם העוזר החכם
+            </button>
+          )}
 
         </div>
 
@@ -52,25 +140,33 @@ export default function HomeScreen() {
 
       <section className="home-features">
 
-        <article>
-          <MapPin />
-          <h3>מיקום חכם</h3>
-        </article>
+        {features.map(feature => {
 
-        <article>
-          <Zap />
-          <h3>התאמה אישית</h3>
-        </article>
+          const Icon = feature.icon;
 
-        <article>
-          <CalendarCheck />
-          <h3>שריון מראש</h3>
-        </article>
+          return (
 
-        <article>
-          <Mic />
-          <h3>עוזר AI</h3>
-        </article>
+            <button
+              key={feature.title}
+              type="button"
+              className="home-feature-button"
+              onClick={feature.action}
+            >
+
+              <Icon size={36} />
+
+              <h3>{feature.title}</h3>
+
+              <p>{feature.description}</p>
+
+              <ArrowLeft
+                size={17}
+                className="home-feature-arrow"
+              />
+
+            </button>
+          );
+        })}
 
       </section>
 

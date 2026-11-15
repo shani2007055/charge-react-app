@@ -116,6 +116,25 @@ export default function VoiceAgentWidget() {
   );
 
   const [isOpen, setIsOpen] = useState<boolean>(false);
+  useEffect(() => {
+
+  function openAssistant() {
+    setIsOpen(true);
+  }
+
+  window.addEventListener(
+    'smart-ev:open-assistant',
+    openAssistant
+  );
+
+  return () => {
+    window.removeEventListener(
+      'smart-ev:open-assistant',
+      openAssistant
+    );
+  };
+
+}, []);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'ai',

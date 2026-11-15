@@ -275,3 +275,30 @@ body, #root {
     font-size: 12px;
   }
 }
+.modern-ai-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+
+  background: #fff7ed;
+  color: #c2410c;
+
+  padding: 10px 15px;
+  border: 1px solid #fed7aa;
+  border-radius: 10px;
+
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.modern-ai-nav:hover {
+  background: #ffedd5;
+}
+
+.modern-ai-nav:focus-visible {
+  outline: 2px solid #ea580c;
+  outline-offset: 3px;
+}

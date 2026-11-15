@@ -1,19 +1,29 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CarFront, Zap, ShieldCheck } from 'lucide-react';
+
+import {
+  CarFront,
+  Zap,
+  ShieldCheck
+} from 'lucide-react';
 
 import {
   useAppDispatch,
   useAppSelector
 } from '../store/hooks';
 
-import { switchUserRole } from '../store/user/userThunks';
+import {
+  switchUserRole
+} from '../store/user/userThunks';
 
 import {
   isAdminToken,
+  hasUserProfile,
   type UserRole
 } from '../store/user/userState';
+
+import ConfirmDialog from './ui/ConfirmDialog';
 
 export default function RoleSwitcher() {
 
@@ -26,15 +36,14 @@ export default function RoleSwitcher() {
 
   const [error, setError] = useState('');
 
-  async function changeRole(newRole: UserRole) {
+  const [pendingRole, setPendingRole] =
+    useState<UserRole | null>(null);
 
-    if (role === newRole || loading) return;
+  async function performSwitch(newRole: UserRole) {
 
-    const approved = window.confirm(
-      'לעבור לפרופיל השני? אם הפרופיל עדיין לא קיים, הוא ייווצר.'
-    );
-
-    if (!approved) return;
+    if (!token || role === newRole || loading) {
+      return;
+    }
 
     setError('');
 
@@ -43,6 +52,8 @@ export default function RoleSwitcher() {
       const result = await dispatch(
         switchUserRole(newRole)
       ).unwrap();
+
+      setPendingRole(null);
 
       navigate(
         isAdminToken(result.token)
@@ -55,6 +66,8 @@ export default function RoleSwitcher() {
 
     } catch (err) {
 
+      setPendingRole(null);
+
       const message =
         typeof err === 'object' &&
         err !== null &&
@@ -66,7 +79,26 @@ export default function RoleSwitcher() {
     }
   }
 
+  function changeRole(newRole: UserRole) {
+
+    if (!token || role === newRole || loading) {
+      return;
+    }
+
+    setError('');
+
+    if (hasUserProfile(token, newRole)) {
+
+      void performSwitch(newRole);
+
+    } else {
+
+      setPendingRole(newRole);
+    }
+  }
+
   if (isAdminToken(token)) {
+
     return (
       <div className="admin-role-label">
         <ShieldCheck size={19} />
@@ -75,13 +107,22 @@ export default function RoleSwitcher() {
     );
   }
 
+  const profileName =
+    pendingRole === 'Owner'
+      ? 'בעל תחנה'
+      : 'נהג';
+
   return (
+
     <div className="role-switcher-wrapper">
 
       <div className="role-switcher">
 
         <button
-          className={role === 'Driver' ? 'selected' : ''}
+          type="button"
+          className={
+            role === 'Driver' ? 'selected' : ''
+          }
           disabled={loading}
           aria-pressed={role === 'Driver'}
           onClick={() => changeRole('Driver')}
@@ -91,7 +132,10 @@ export default function RoleSwitcher() {
         </button>
 
         <button
-          className={role === 'Owner' ? 'selected' : ''}
+          type="button"
+          className={
+            role === 'Owner' ? 'selected' : ''
+          }
           disabled={loading}
           aria-pressed={role === 'Owner'}
           onClick={() => changeRole('Owner')}
@@ -107,6 +151,25 @@ export default function RoleSwitcher() {
           {error}
         </small>
       )}
+
+      <ConfirmDialog
+        open={pendingRole !== null}
+        title={`יצירת פרופיל ${profileName}`}
+        message={
+          `עדיין אין לך פרופיל ${profileName}. ` +
+          'האם ליצור פרופיל חדש ולעבור אליו?'
+        }
+        confirmText="יצירת פרופיל"
+        cancelText="ביטול"
+        loading={loading}
+        onCancel={() => setPendingRole(null)}
+        onConfirm={() => {
+
+          if (pendingRole) {
+            void performSwitch(pendingRole);
+          }
+        }}
+      />
 
     </div>
   );

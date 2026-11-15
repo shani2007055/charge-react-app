@@ -23,6 +23,36 @@ export function isAdminToken(token: string | null): boolean {
     return false;
   }
 }
+export function hasUserProfile(
+  token: string | null,
+  role: UserRole
+): boolean {
+
+  if (!token) return false;
+
+  try {
+    const payload = token.split('.')[1];
+
+    const base64 = payload
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
+
+    const claims = JSON.parse(atob(base64));
+
+    const claimName =
+      role === 'Owner'
+        ? 'ownerId'
+        : 'driverId';
+
+    const profileId = Number(claims[claimName]);
+
+    return Number.isInteger(profileId) &&
+      profileId > 0;
+
+  } catch {
+    return false;
+  }
+}
 
 export interface UserState {
   id: number | null;
