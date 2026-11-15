@@ -1,97 +1,371 @@
 :root {
-  --bg-dark: #121212;
-  --card-bg: #1e1e1e;
-  --card-border: #333333;
-  --primary: #85e02c;
-  --primary-hover: #6eb822;
-  --accent-blue: #2563eb;
-  --light-blue: #7dd3fc;
-  --green-dark: #16a34a;
-  --text-main: #f8fafc;
-  --text-muted: #94a3b8;
-  --danger: #ef4444;
-  --warning: #f97316;
-  --yellow: #facc15;
+  /* פלטת הצבעים החדשה — קנבס בהיר ונקי + טורקיז EV */
+  --ev-bg: #f6f8fa;
+  --ev-surface: #ffffff;
+  --ev-surface-subtle: #f1f5f9;
+  --ev-border: #e2e8f0;
+  --ev-border-strong: #cbd5e1;
+
+  --ev-ink: #0f172a;
+  --ev-ink-muted: #475569;
+  --ev-ink-soft: #64748b;
+
+  --ev-brand: #0d9488;
+  --ev-brand-hover: #0f766e;
+  --ev-brand-soft: #f0fdfa;
+  --ev-brand-border: #99f6e4;
+
+  --ev-success: #16a34a;
+  --ev-warning: #d97706;
+  --ev-danger: #dc2626;
+  --ev-danger-soft: #fef2f2;
+  --ev-danger-border: #fecaca;
+
+  /* תאימות לאחור לשמות משתנים קיימים ברכיבים שטרם עודכנו */
+  --bg-dark: #f6f8fa;
+  --card-bg: #ffffff;
+  --card-border: #e2e8f0;
+  --primary: #0d9488;
+  --primary-hover: #0f766e;
+  --accent-blue: #0d9488;
+  --light-blue: #0f766e;
+  --green-dark: #15803d;
+  --text-main: #0f172a;
+  --text-muted: #475569;
+  --danger: #dc2626;
+  --warning: #d97706;
+  --yellow: #eab308;
 }
 
-* { 
-  box-sizing: border-box; 
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
-body { 
-  margin: 0; 
-  padding: 0; 
-  background-color: var(--bg-dark); 
-  color: var(--text-main); 
-  direction: rtl; 
-  text-align: right; 
+.font-mono-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
-.container { max-width: 1000px; margin: 20px auto; padding: 0 15px; }
+/* מעטפת אפליקציה ו-Header עליון */
+.ev-app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--ev-bg);
+  color: var(--ev-ink);
+}
 
-.form-group { 
-  margin-bottom: 18px; 
+.ev-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--ev-border);
+}
+
+.ev-header-inner {
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 0 20px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.ev-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--ev-ink);
+  font-family: var(--font-sans);
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.ev-brand-icon {
+  color: var(--ev-brand);
+  flex-shrink: 0;
+}
+
+.ev-nav {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  overflow-x: auto;
+}
+
+.ev-nav-link {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 2px;
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--ev-ink-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.ev-nav-link:hover {
+  color: var(--ev-ink);
+}
+
+.ev-nav-link.active {
+  color: var(--ev-brand);
+  border-bottom-color: var(--ev-brand);
+  font-weight: 600;
+}
+
+.ev-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.ev-user-greeting {
+  font-size: 0.85rem;
+  color: var(--ev-ink-muted);
+  white-space: nowrap;
+}
+
+.ev-main {
+  flex: 1;
+  width: 100%;
+  max-width: 1160px;
+  margin: 0 auto;
+  padding: 24px 20px 88px;
+}
+
+/* מחלקות בסיס משותפות למסכים */
+.container {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0;
+}
+
+.ev-card,
+.screen-view {
+  background: var(--ev-surface);
+  border: 1px solid var(--ev-border);
+  border-radius: 14px;
+  padding: 24px;
+  color: var(--ev-ink);
+}
+
+.screen-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--ev-surface-subtle);
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--ev-ink);
+}
+
+.ev-subtitle {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--ev-ink-soft);
+}
+
+/* טפסים ושדות */
+.form-group {
+  margin-bottom: 16px;
   width: 100%;
 }
 
-.form-group label { 
-  display: block; 
-  font-weight: 600; 
-  margin-bottom: 6px; 
-  font-size: 0.95rem; 
-  color: var(--text-main); 
-  text-align: right; 
-}
-
-.form-control { 
-  width: 100%; 
-  padding: 12px 14px; 
-  background: #121212; 
-  border: 1px solid var(--card-border); 
-  border-radius: 8px; 
-  font-size: 0.95rem; 
-  color: white; 
-  direction: rtl;
+.form-group label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+  font-size: 0.85rem;
+  color: var(--ev-ink);
   text-align: right;
 }
 
-.btn { 
-  background: var(--accent-blue); 
-  color: white; 
-  border: none; 
-  padding: 12px 20px; 
-  border-radius: 8px; 
-  font-weight: 700; 
-  cursor: pointer; 
-  transition: opacity 0.2s; 
-  font-size: 0.95rem; 
-  width: 100%; 
+.form-control,
+.ev-input {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--ev-surface);
+  border: 1px solid var(--ev-border);
+  border-radius: 9px;
+  font-family: var(--font-sans);
+  font-size: 0.92rem;
+  color: var(--ev-ink);
+  direction: rtl;
+  text-align: right;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.btn:hover { opacity: 0.9; }
-
-.auth-toggle { 
-  display: flex; 
-  gap: 10px; 
-  margin-bottom: 20px; 
-  background: #121212; 
-  padding: 6px; 
-  border-radius: 10px; 
-  border: 1px solid var(--card-border); 
+.form-control:focus,
+.ev-input:focus {
+  outline: none;
+  border-color: var(--ev-brand);
+  box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.12);
 }
 
-.auth-toggle-btn { 
-  flex: 1; 
-  padding: 8px; 
-  text-align: center; 
-  cursor: pointer; 
-  border-radius: 6px; 
-  font-weight: 600; 
-  color: var(--text-muted); 
+/* כפתורים */
+.btn,
+.ev-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--ev-brand);
+  color: #ffffff;
+  border: 1px solid transparent;
+  padding: 11px 18px;
+  border-radius: 9px;
+  font-family: var(--font-sans);
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  width: 100%;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
 }
 
-.auth-toggle-btn.active { 
-  background: var(--card-bg); 
-  color: var(--light-blue); 
+.btn:hover:not(:disabled),
+.ev-btn:hover:not(:disabled) {
+  background: var(--ev-brand-hover);
+}
+
+.btn:disabled,
+.ev-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ev-btn-auto {
+  width: auto;
+  padding: 8px 14px;
+  font-size: 0.84rem;
+}
+
+.ev-btn-secondary {
+  background: var(--ev-surface);
+  color: var(--ev-ink);
+  border: 1px solid var(--ev-border);
+}
+
+.ev-btn-secondary:hover:not(:disabled) {
+  background: var(--ev-surface-subtle);
+}
+
+.ev-btn-dark {
+  background: var(--ev-ink);
+  color: #ffffff;
+}
+
+.ev-btn-dark:hover:not(:disabled) {
+  background: #1e293b;
+}
+
+.ev-btn-danger {
+  background: var(--ev-danger-soft);
+  color: var(--ev-danger);
+  border: 1px solid var(--ev-danger-border);
+}
+
+.ev-btn-danger:hover:not(:disabled) {
+  background: #fee2e2;
+}
+
+/* טאבים ובקרת סגמנטים */
+.auth-toggle {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 20px;
+  background: var(--ev-surface-subtle);
+  padding: 4px;
+  border-radius: 10px;
+}
+
+.auth-toggle-btn {
+  flex: 1;
+  padding: 8px 12px;
+  text-align: center;
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  font-family: var(--font-sans);
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--ev-ink-muted);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.auth-toggle-btn.active {
+  background: var(--ev-surface);
+  color: var(--ev-ink);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+/* הודעות שגיאה וסטטוס */
+.ev-alert-error {
+  background: var(--ev-danger-soft);
+  border: 1px solid var(--ev-danger-border);
+  color: #991b1b;
+  padding: 11px 14px;
+  border-radius: 9px;
+  font-size: 0.88rem;
+  margin-bottom: 16px;
+  text-align: center;
+}
+
+.ev-alert-brand {
+  background: var(--ev-brand-soft);
+  border: 1px solid var(--ev-brand-border);
+  color: #115e59;
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  margin-bottom: 16px;
+}
+
+.leaflet-container {
+  font-family: var(--font-sans);
+  background: #e9f2f4;
+}
+
+@media (max-width: 720px) {
+  .ev-header-inner {
+    height: auto;
+    padding: 12px 16px;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .ev-user-greeting {
+    display: none;
+  }
+
+  .ev-main {
+    padding: 16px 14px 88px;
+  }
+
+  .ev-card,
+  .screen-view {
+    padding: 18px;
+  }
 }

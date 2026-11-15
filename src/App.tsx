@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
-import { Navigate, Outlet, Route, Routes, useNavigate } from 'react-router-dom';
+import { Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import LoginScreen from './components/LoginScreen';
 import DriverSearchScreen from './components/DriverSearchScreen';
 import StationResultsScreen from './components/StationResultsScreen';
@@ -12,7 +12,6 @@ import { useAppDispatch, useAppSelector } from './store/hooks';
 import { expireSession, logout } from './store/user/userSlice';
 import './App.css';
 
-// רכיב הגנה: מי שלא מחובר עם Token מוחזר אוטומטית למסך ההתחברות
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const token = useAppSelector((state) => state.user.token);
   if (!token) {
@@ -25,6 +24,7 @@ function Layout() {
   const { token, role, name } = useAppSelector((state) => state.user);
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
+  const location = useLocation();
   const homePath = role === 'Owner' ? '/owner' : '/search';
 
   useEffect(() => {
@@ -32,50 +32,94 @@ function Layout() {
       dispatch(expireSession());
       navigate('/', { replace: true });
     };
-
     window.addEventListener('auth:expired', handleSessionExpired);
     return () => window.removeEventListener('auth:expired', handleSessionExpired);
   }, [dispatch, navigate]);
 
   return (
-    <div className="container" dir="rtl">
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px', marginBottom: '20px' }}>
-        <div>
-          <h1 style={{ color: 'white', margin: 0 }}>⚡ Smart EV Charging</h1>
-          <p style={{ color: '#94a3b8', margin: '4px 0 0 0' }}>מערכת חכמה לחיפוש עמדות, שריון שקע וניהול קהילתי</p>
-        </div>
-
-        {/* תפריט עליון נקי המופיע רק למשתמש מחובר */}
-        {token && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <span style={{ color: '#cbd5e1', fontSize: '0.9rem', marginLeft: '6px' }}>שלום, {name}</span>
-            <button type="button" className="btn" style={{ width: 'auto', padding: '8px 14px', fontSize: '0.85rem', cursor: 'pointer' }} onClick={() => navigate(homePath)}>
-              🏠 מסך ראשי
-            </button>
-            {role === 'Driver' && (
-              <button type="button" className="btn" style={{ width: 'auto', padding: '8px 14px', fontSize: '0.85rem', background: '#1e293b', cursor: 'pointer' }} onClick={() => navigate('/active')}>
-                ⏱️ השריון שלי
-              </button>
-            )}
-            <button type="button" className="btn" style={{ width: 'auto', padding: '8px 14px', fontSize: '0.85rem', background: '#1e293b', cursor: 'pointer' }} onClick={() => navigate('/profile')}>
-              👤 פרופיל
-            </button>
-            <button
-              type="button"
-              className="btn"
-              style={{ width: 'auto', padding: '8px 14px', fontSize: '0.85rem', background: '#7f1d1d', cursor: 'pointer' }}
-              onClick={() => {
-                dispatch(logout());
-                navigate('/');
-              }}
+    <div className="ev-app-shell" dir="rtl">
+      <header className="ev-header">
+        <div className="ev-header-inner">
+          <button
+            type="button"
+            className="ev-brand"
+            onClick={() => navigate(token ? homePath : '/')}
+          >
+            <svg
+              className="ev-brand-icon"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
             >
-              🚪 התנתק
-            </button>
-          </div>
-        )}
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+            </svg>
+            <span>Smart EV</span>
+          </button>
+
+          {token && (
+            <nav className="ev-nav" aria-label="ניווט ראשי">
+              <button
+                type="button"
+                className={`ev-nav-link ${location.pathname === homePath ? 'active' : ''}`}
+                onClick={() => navigate(homePath)}
+              >
+                {role === 'Owner' ? 'ניהול עמדות' : 'חיפוש עמדות'}
+              </button>
+
+              {role === 'Driver' && (
+                <>
+                  <button
+                    type="button"
+                    className={`ev-nav-link ${location.pathname === '/results' ? 'active' : ''}`}
+                    onClick={() => navigate('/results')}
+                  >
+                    מפה ותוצאות
+                  </button>
+                  <button
+                    type="button"
+                    className={`ev-nav-link ${location.pathname === '/active' ? 'active' : ''}`}
+                    onClick={() => navigate('/active')}
+                  >
+                    השריון שלי
+                  </button>
+                </>
+              )}
+
+              <button
+                type="button"
+                className={`ev-nav-link ${location.pathname === '/profile' ? 'active' : ''}`}
+                onClick={() => navigate('/profile')}
+              >
+                פרופיל
+              </button>
+            </nav>
+          )}
+
+          {token && (
+            <div className="ev-header-actions">
+              <span className="ev-user-greeting">שלום, {name}</span>
+              <button
+                type="button"
+                className="ev-btn ev-btn-secondary ev-btn-auto"
+                onClick={() => {
+                  dispatch(logout());
+                  navigate('/');
+                }}
+              >
+                התנתקות
+              </button>
+            </div>
+          )}
+        </div>
       </header>
 
-      <main>
+      <main className="ev-main">
         <Outlet />
       </main>
 
