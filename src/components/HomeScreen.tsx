@@ -1,5 +1,11 @@
-
 import { useNavigate } from 'react-router-dom';
+import {
+  MapPin,
+  Zap,
+  CalendarCheck,
+  Mic
+} from 'lucide-react';
+
 import './HomeScreen.css';
 
 export default function HomeScreen() {
@@ -47,27 +53,23 @@ export default function HomeScreen() {
       <section className="home-features">
 
         <article>
-          <span>📍</span>
-          <h3>חיפוש חכם</h3>
-          <p>מציאת עמדות בהתאם למיקום ולצרכים שלכם.</p>
+          <MapPin />
+          <h3>מיקום חכם</h3>
         </article>
 
         <article>
-          <span>⚡</span>
+          <Zap />
           <h3>התאמה אישית</h3>
-          <p>המלצות בהתאם לסוללה ולסוג המטען.</p>
         </article>
 
         <article>
-          <span>🕒</span>
+          <CalendarCheck />
           <h3>שריון מראש</h3>
-          <p>הזמנת עמדה לפני ההגעה.</p>
         </article>
 
         <article>
-          <span>🎙️</span>
-          <h3>עוזר חכם</h3>
-          <p>חיפוש עמדות באמצעות העוזר הקולי.</p>
+          <Mic />
+          <h3>עוזר AI</h3>
         </article>
 
       </section>

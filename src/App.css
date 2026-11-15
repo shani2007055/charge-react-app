@@ -395,3 +395,118 @@
     padding: 18px;
   }
 }
+
+/* מעבר בין סוגי פרופילים */
+
+.role-switcher {
+  display: flex;
+  background: #f1f5f9;
+  padding: 4px;
+  border-radius: 12px;
+  gap: 4px;
+  border: 1px solid #e2e8f0;
+}
+
+.role-switcher button {
+  border: none;
+  background: transparent;
+  color: #64748b;
+  padding: 9px 16px;
+  border-radius: 9px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: 0.2s;
+}
+
+.role-switcher button.selected {
+  background: #0f172a;
+  color: white;
+  box-shadow: 0 2px 5px #00000015;
+}
+
+.role-switcher button:hover:not(.selected):not(:disabled) {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.role-switcher button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.role-error {
+  display: block;
+  color: #dc2626;
+  margin-top: 5px;
+  font-size: 12px;
+}
+
+.role-switcher-wrapper {
+  flex-shrink: 0;
+}
+
+@media (max-width: 900px) {
+  .ev-header-inner {
+    height: auto;
+    min-height: 64px;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 12px 16px;
+  }
+
+  .ev-nav {
+    flex-wrap: wrap;
+  }
+}
+
+/* Responsive layout */
+
+.ev-header-inner {
+  width: 96%;
+  max-width: 1800px;
+  min-height: 76px;
+  margin-inline: auto;
+}
+
+.ev-main {
+  width: 96%;
+  max-width: 1700px;
+  margin-inline: auto;
+  padding: 32px 24px 90px;
+  box-sizing: border-box;
+}
+
+.ev-app-shell {
+  min-height: 100vh;
+  background: #f8fafc;
+}
+
+/* ביטול הקווים הישנים ברקע */
+.ev-bg-contours {
+  display: none;
+}
+
+.ev-nav-link {
+  font-size: 16px;
+}
+
+.ev-brand {
+  font-size: 23px;
+}
+
+@media (max-width: 768px) {
+  .ev-main {
+    width: 100%;
+    padding: 16px 12px 80px;
+  }
+
+  .ev-header-inner {
+    width: 100%;
+    height: auto;
+    flex-wrap: wrap;
+    padding: 12px;
+  }
+}

@@ -1,0 +1,277 @@
+
+:root {
+  --modern-navy: #0f172a;
+  --modern-orange: #ea580c;
+  --modern-bg: #f8fafc;
+  --modern-border: #e2e8f0;
+}
+
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+}
+
+body, #root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+.ev-app-shell {
+  background: var(--modern-bg);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.ev-main {
+  width: 100%;
+  max-width: 1800px;
+  margin: 0 auto;
+  padding: 32px clamp(16px, 4vw, 70px) 60px;
+  flex: 1;
+}
+
+/* Header */
+
+.modern-header {
+  position: sticky;
+  top: 0;
+  z-index: 1100;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid var(--modern-border);
+}
+
+.modern-header-inner {
+  width: 100%;
+  max-width: 1800px;
+  margin: auto;
+  padding: 18px clamp(16px, 4vw, 70px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.modern-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--modern-navy);
+  text-decoration: none;
+  direction: ltr;
+  white-space: nowrap;
+}
+
+.modern-logo-icon {
+  background: var(--modern-orange);
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  color: white;
+}
+
+.modern-logo small {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: #64748b;
+}
+
+.modern-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+
+.modern-nav a {
+  color: #475569;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 15px;
+  position: relative;
+  padding-block: 10px;
+  transition: color 0.2s;
+}
+
+.modern-nav a:hover,
+.modern-nav a.active {
+  color: var(--modern-orange);
+}
+
+.modern-nav a.active::after {
+  content: '';
+  height: 3px;
+  border-radius: 10px;
+  background: var(--modern-orange);
+  position: absolute;
+  right: 0;
+  left: 0;
+  bottom: 0;
+}
+
+.modern-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.modern-primary,
+.modern-outline {
+  padding: 12px 22px;
+  border-radius: 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: 0.25s;
+}
+
+.modern-primary {
+  background: var(--modern-navy);
+  color: white;
+  border: 1px solid var(--modern-navy);
+}
+
+.modern-primary:hover {
+  background: var(--modern-orange);
+  border-color: var(--modern-orange);
+  transform: translateY(-2px);
+}
+
+.modern-outline {
+  background: white;
+  color: var(--modern-navy);
+  border: 1px solid var(--modern-border);
+}
+
+.modern-outline:hover {
+  background: #fff7ed;
+  border-color: var(--modern-orange);
+}
+
+.modern-footer {
+  background: var(--modern-navy);
+  color: #cbd5e1;
+  padding: 28px 5%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.modern-footer strong {
+  color: white;
+  font-size: 22px;
+}
+
+@media (max-width: 1000px) {
+  .modern-header-inner {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .modern-nav {
+    order: 3;
+    width: 100%;
+    gap: 18px;
+  }
+}
+
+@media (max-width: 600px) {
+  .modern-logo {
+    font-size: 18px;
+  }
+
+  .modern-user {
+    display: none;
+  }
+
+  .modern-footer {
+    flex-direction: column;
+    text-align: center;
+  }
+
+  .ev-main {
+    padding: 16px 12px 40px;
+  }
+}
+.role-switcher-wrapper {
+  position: relative;
+}
+
+.role-switcher {
+  display: flex;
+  gap: 4px;
+  padding: 5px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 13px;
+}
+
+.role-switcher button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: transparent;
+  border: none;
+  border-radius: 9px;
+  padding: 10px 14px;
+  color: #64748b;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: 0.25s;
+}
+
+.role-switcher button.selected {
+  background: #0f172a;
+  color: white;
+  box-shadow: 0 4px 12px #0f172a20;
+}
+
+.role-switcher button.selected svg {
+  color: #fb923c;
+}
+
+.role-switcher button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.role-error {
+  display: block;
+  color: #dc2626;
+  font-size: 12px;
+}
+
+.admin-role-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: #fff7ed;
+  color: #c2410c;
+  font-weight: 700;
+}
+
+@media (max-width: 650px) {
+  .modern-actions {
+    flex-wrap: wrap;
+  }
+
+  .role-switcher button {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+}

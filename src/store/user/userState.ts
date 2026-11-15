@@ -1,6 +1,28 @@
 import { isTokenExpired } from '../../api/apiClient';
 
 export type UserRole = 'Driver' | 'Owner';
+export function isAdminToken(token: string | null): boolean {
+  if (!token) return false;
+
+  try {
+    const payload = token.split('.')[1];
+    const base64 = payload
+      .replace(/-/g, '+')
+      .replace(/_/g, '/');
+
+    const claims = JSON.parse(atob(base64));
+
+    const role =
+      claims['http://schemas.microsoft.com/ws/2008/06/identity/claims/role']
+      ?? claims.role;
+
+    return role === 'Admin' ||
+      (Array.isArray(role) && role.includes('Admin'));
+
+  } catch {
+    return false;
+  }
+}
 
 export interface UserState {
   id: number | null;
