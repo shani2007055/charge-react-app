@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { useNavigate, useParams } from 'react-router-dom';
 import { MapPin } from 'lucide-react';
 import { apiFetch } from '../api/apiClient';
+import { useDriverGps } from '../hooks/useDriverGps';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import {
-  setDriverLocation,
   setSearchBattery,
   setSelectedVehicle,
 } from '../store/stations/stationsSlice';
@@ -91,11 +91,17 @@ export default function StationDetailsScreen() {
   const dispatch = useAppDispatch();
 
   const {
-    driverLocation,
     selectedVehicleId,
     currentBatteryPercent,
     targetBatteryPercent,
   } = useAppSelector((state) => state.stations);
+
+  const {
+    driverLocation,
+    detectingGps,
+    gpsError: gpsHint,
+    requestLocation,
+  } = useDriverGps();
 
   const [station, setStation] = useState<Station | null>(null);
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
@@ -111,51 +117,12 @@ export default function StationDetailsScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reserving, setReserving] = useState<boolean>(false);
   const [reserveError, setReserveError] = useState<string | null>(null);
-  const [detectingGps, setDetectingGps] = useState<boolean>(false);
-  const [gpsHint, setGpsHint] = useState<string | null>(null);
-
-  const requestDriverLocation = useCallback(
-    (manual = false) => {
-      if (!('geolocation' in navigator)) {
-        if (manual) {
-          setGpsHint('הדפדפן אינו תומך בזיהוי מיקום אוטומטי.');
-        }
-        return;
-      }
-
-      setDetectingGps(true);
-      if (manual) {
-        setGpsHint(null);
-      }
-
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          dispatch(
-            setDriverLocation({
-              lat: pos.coords.latitude,
-              lng: pos.coords.longitude,
-            })
-          );
-          setDetectingGps(false);
-          setGpsHint(null);
-        },
-        () => {
-          setDetectingGps(false);
-          if (manual) {
-            setGpsHint('לא ניתן היה לקרוא את מיקום ה-GPS (יש לאשר הרשאת מיקום בדפדפן).');
-          }
-        },
-        { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 }
-      );
-    },
-    [dispatch]
-  );
 
   useEffect(() => {
     if (!driverLocation) {
-      requestDriverLocation(false);
+      void requestLocation({ silent: true, timeoutMs: 8000, maximumAgeMs: 60000 });
     }
-  }, [driverLocation, requestDriverLocation]);
+  }, [driverLocation, requestLocation]);
 
   useEffect(() => {
     if (!Number.isInteger(stationId) || stationId <= 0) {
@@ -671,7 +638,7 @@ export default function StationDetailsScreen() {
                             className="ev-btn ev-btn-secondary ev-btn-auto"
                             style={{ marginTop: '6px', padding: '4px 9px', fontSize: '0.74rem' }}
                             disabled={detectingGps}
-                            onClick={() => requestDriverLocation(true)}
+                            onClick={() => void requestLocation()}
                           >
                             {detectingGps ? 'מאתר מיקום...' : 'חשב לפי GPS'}
                           </button>

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch, isTokenExpired, triggerSessionExpired } from '../api/apiClient';
+import { useDriverGps } from '../hooks/useDriverGps';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { setDriverLocation } from '../store/stations/stationsSlice';
 import type { DriverCoords, Station } from '../store/stations/stationsState';
 import { fetchStations } from '../store/stations/stationsThunks';
 
@@ -138,8 +138,18 @@ export default function VoiceAgentWidget() {
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
   const { role, carModel } = useAppSelector((state) => state.user);
-  const { currentBatteryPercent, targetBatteryPercent, driverLocation, selectedVehicleId } =
-    useAppSelector((state) => state.stations);
+  const { currentBatteryPercent, targetBatteryPercent, selectedVehicleId } = useAppSelector(
+    (state) => state.stations
+  );
+
+  const {
+    driverLocation,
+    detectingGps: locatingGps,
+    gpsDenied: locationDenied,
+    requestLocation,
+    updateLocation,
+    setGpsDenied: setLocationDenied,
+  } = useDriverGps();
 
   const [isOpen, setIsOpen] = useState<boolean>(false);
 
@@ -169,8 +179,6 @@ export default function VoiceAgentWidget() {
 
   // שיתוף ובקרת מיקום GPS לסוכן
   const [shareLocation, setShareLocation] = useState<boolean>(true);
-  const [locatingGps, setLocatingGps] = useState<boolean>(false);
-  const [locationDenied, setLocationDenied] = useState<boolean>(false);
   const [detectedAddress, setDetectedAddress] = useState<string | null>(null);
   const [showManualLocation, setShowManualLocation] = useState<boolean>(false);
   const [manualAddressInput, setManualAddressInput] = useState<string>('');
@@ -231,46 +239,17 @@ export default function VoiceAgentWidget() {
     };
   }, [driverLocation]);
 
-  const requestGpsCoords = (): Promise<DriverCoords | null> => {
-    if (!navigator.geolocation) {
-      setLocationDenied(true);
-      return Promise.resolve(null);
-    }
-
-    setLocatingGps(true);
-    return new Promise((resolve) => {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const coords: DriverCoords = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-          };
-          dispatch(setDriverLocation(coords));
-          setLocationDenied(false);
-          setLocatingGps(false);
-          resolve(coords);
-        },
-        () => {
-          setLocationDenied(true);
-          setLocatingGps(false);
-          resolve(null);
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 }
-      );
-    });
-  };
-
   // איתור מיקום ברקע ברגע שפותחים את הצ'אט אם עוד אין מיקום שמור
   useEffect(() => {
     if (isOpen && shareLocation && !driverLocation && !locationDenied && !locatingGps) {
-      void requestGpsCoords();
+      void requestLocation({ silent: true });
     }
-  }, [isOpen, shareLocation, driverLocation, locationDenied]);
+  }, [isOpen, shareLocation, driverLocation, locationDenied, locatingGps, requestLocation]);
 
   const resolveCurrentCoords = async (): Promise<DriverCoords | null> => {
     if (!shareLocation) return null;
     if (driverLocation) return driverLocation;
-    return requestGpsCoords();
+    return requestLocation({ silent: true });
   };
 
   const handleToggleLocationShare = () => {
@@ -282,7 +261,7 @@ export default function VoiceAgentWidget() {
     setShareLocation(true);
     setLocationDenied(false);
     if (!driverLocation) {
-      void requestGpsCoords();
+      void requestLocation({ silent: true });
     }
   };
 
@@ -556,9 +535,8 @@ export default function VoiceAgentWidget() {
         lat: Number(results[0].lat),
         lng: Number(results[0].lon),
       };
-      dispatch(setDriverLocation(coords));
+      updateLocation(coords);
       setShareLocation(true);
-      setLocationDenied(false);
       setDetectedAddress(trimmed);
       setManualAddressInput('');
       setShowManualLocation(false);
@@ -578,7 +556,7 @@ export default function VoiceAgentWidget() {
   };
 
   const handleRefreshGpsClick = async () => {
-    const coords = await requestGpsCoords();
+    const coords = await requestLocation({ silent: true });
     if (!coords || isStreaming) return;
     if (lastUserQueryRef.current) {
       void sendMessageToAgent(

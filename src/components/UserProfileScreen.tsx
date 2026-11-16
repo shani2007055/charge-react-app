@@ -1,8 +1,9 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../api/apiClient';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { logout, updateUserName } from '../store/user/userSlice';
+import { setSearchBattery, setSelectedVehicle } from '../store/stations/stationsSlice';
 import PageHeader from './ui/PageHeader';
 import { UserRound } from 'lucide-react';
 import './ui/DriverDashboard.css';
@@ -35,6 +36,10 @@ type ChargerType = 'CCS' | 'Type2';
 
 const ISRAELI_PHONE_REGEX = /^0\d{1,2}-?\d{7}$/;
 const PASSWORD_RULE = /^(?=.*[A-Za-z])(?=.*\d).{8,100}$/;
+
+function getDefaultTargetBattery(currentBattery: number): number {
+  return Math.min(100, Math.max(80, currentBattery + 10));
+}
 
 const subtleLabelStyle = {
   display: 'block',
@@ -100,6 +105,12 @@ export default function UserProfileScreen() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const { role } = useAppSelector((state) => state.user);
+  const selectedVehicleId = useAppSelector((state) => state.stations.selectedVehicleId);
+  const selectedVehicleIdRef = useRef<number | null>(selectedVehicleId);
+
+  useEffect(() => {
+    selectedVehicleIdRef.current = selectedVehicleId;
+  }, [selectedVehicleId]);
 
   const [profile, setProfile] = useState<UserProfileDto | null>(null);
   const [vehicles, setVehicles] = useState<VehicleDto[]>([]);
@@ -143,43 +154,92 @@ export default function UserProfileScreen() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
 
-  const loadProfileData = async () => {
-    setLoading(true);
-    setError(null);
-
-    try {
-      const claims = await apiFetch<UserClaim[]>('/users/me');
-      const userIdClaim = claims.find(
-        (c) => c.type === 'nameid' || c.type.endsWith('/nameidentifier')
+  const syncActiveVehicle = (vehicle: VehicleDto | null) => {
+    if (vehicle) {
+      dispatch(setSelectedVehicle(vehicle.id));
+      dispatch(
+        setSearchBattery({
+          currentBatteryPercent: vehicle.currentBattery,
+          targetBatteryPercent: getDefaultTargetBattery(vehicle.currentBattery),
+        })
       );
-
-      if (!userIdClaim) {
-        throw new Error('לא נמצא מזהה משתמש בטוקן. נסי להתחבר מחדש.');
-      }
-
-      const userId = Number(userIdClaim.value);
-      const userProfile = await apiFetch<UserProfileDto>(`/users/${userId}`);
-
-      setProfile(userProfile);
-      setEditName(userProfile.name);
-      setEditPhone(userProfile.phone);
-
-      if (userProfile.driverId !== null) {
-        const myVehicles = await apiFetch<VehicleDto[]>('/UsersVehicles/my');
-        setVehicles(myVehicles);
-      } else {
-        setVehicles([]);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה בטעינת הפרופיל');
-    } finally {
-      setLoading(false);
+    } else {
+      dispatch(setSelectedVehicle(null));
+      dispatch(
+        setSearchBattery({
+          currentBatteryPercent: 50,
+          targetBatteryPercent: 80,
+        })
+      );
     }
   };
 
   useEffect(() => {
+    let active = true;
+
+    const loadProfileData = async () => {
+      setLoading(true);
+      setError(null);
+
+      try {
+        const claims = await apiFetch<UserClaim[]>('/users/me');
+        const userIdClaim = claims.find(
+          (c) => c.type === 'nameid' || c.type.endsWith('/nameidentifier')
+        );
+
+        if (!userIdClaim) {
+          throw new Error('לא נמצא מזהה משתמש בטוקן. נסי להתחבר מחדש.');
+        }
+
+        const userId = Number(userIdClaim.value);
+        const userProfile = await apiFetch<UserProfileDto>(`/users/${userId}`);
+
+        if (!active) return;
+        setProfile(userProfile);
+        setEditName(userProfile.name);
+        setEditPhone(userProfile.phone);
+
+        if (userProfile.driverId !== null) {
+          const myVehicles = await apiFetch<VehicleDto[]>('/UsersVehicles/my');
+          if (!active) return;
+          setVehicles(myVehicles);
+
+          const currentSelectedId = selectedVehicleIdRef.current;
+          if (myVehicles.length === 0) {
+            if (currentSelectedId !== null) {
+              dispatch(setSelectedVehicle(null));
+            }
+          } else if (
+            currentSelectedId === null ||
+            !myVehicles.some((v) => v.id === currentSelectedId)
+          ) {
+            const first = myVehicles[0];
+            dispatch(setSelectedVehicle(first.id));
+            dispatch(
+              setSearchBattery({
+                currentBatteryPercent: first.currentBattery,
+                targetBatteryPercent: getDefaultTargetBattery(first.currentBattery),
+              })
+            );
+          }
+        } else {
+          setVehicles([]);
+        }
+      } catch (err) {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : 'שגיאה בטעינת הפרופיל');
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    };
+
     void loadProfileData();
-  }, []);
+    return () => {
+      active = false;
+    };
+  }, [dispatch]);
 
   const handleSaveProfile = async (e: FormEvent) => {
     e.preventDefault();
@@ -305,12 +365,13 @@ export default function UserProfileScreen() {
       });
 
       setVehicles((prev) => [...prev, created]);
+      syncActiveVehicle(created);
       setNewModel('');
       setNewCapacityKwh('60');
       setNewCurrentBattery('50');
       setNewChargerType('CCS');
       setShowAddVehicle(false);
-      setSuccessMessage(`הרכב "${created.model}" נוסף בהצלחה!`);
+      setSuccessMessage(`הרכב "${created.model}" נוסף ונקבע כרכב הפעיל לחיפוש!`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בהוספת הרכב');
     } finally {
@@ -362,9 +423,19 @@ export default function UserProfileScreen() {
         }),
       });
 
-      setVehicles((prev) => prev.map((v) => (v.id === vehicleId ? updated : v)));
+      const nextVehicles = vehicles.map((v) => (v.id === vehicleId ? updated : v));
+      setVehicles(nextVehicles);
+
+      if (
+        selectedVehicleId === vehicleId ||
+        selectedVehicleId === null ||
+        nextVehicles.length === 1
+      ) {
+        syncActiveVehicle(updated);
+      }
+
       setEditingVehicleId(null);
-      setSuccessMessage('פרטי הרכב עודכנו בהצלחה!');
+      setSuccessMessage('פרטי הרכב עודכנו וסונכרנו בהצלחה!');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בעדכון הרכב');
     } finally {
@@ -381,7 +452,11 @@ export default function UserProfileScreen() {
       await apiFetch<string>(`/UsersVehicles/${vehicleId}`, {
         method: 'DELETE',
       });
-      setVehicles((prev) => prev.filter((v) => v.id !== vehicleId));
+      const remaining = vehicles.filter((v) => v.id !== vehicleId);
+      setVehicles(remaining);
+      if (selectedVehicleId === vehicleId) {
+        syncActiveVehicle(remaining[0] ?? null);
+      }
       setConfirmDeleteId(null);
       setSuccessMessage('הרכב הוסר מהרשימה.');
     } catch (err) {
@@ -391,28 +466,31 @@ export default function UserProfileScreen() {
     }
   };
 
+  const handleSetActiveVehicle = (vehicle: VehicleDto) => {
+    setError(null);
+    syncActiveVehicle(vehicle);
+    setSuccessMessage(`"${vehicle.model}" נקבע כרכב הפעיל לחיפוש ולשריון.`);
+  };
+
   const handleLogout = () => {
     dispatch(logout());
     navigate('/');
   };
 
   return (
-  <div className="dash-page" dir="rtl">
+    <div className="dash-page" dir="rtl">
+      <PageHeader
+        title="הפרופיל שלי"
+        description="ניהול פרטים אישיים, אבטחת החשבון והרכבים שלי"
+        icon={UserRound}
+        actions={
+          <span className="ev-badge ev-badge-brand">
+            {role === 'Owner' ? 'בעל עמדה' : 'נהג'}
+          </span>
+        }
+      />
 
-    <PageHeader
-      title="הפרופיל שלי"
-      description="ניהול פרטים אישיים, אבטחת החשבון והרכבים שלי"
-      icon={UserRound}
-      actions={
-        <span className="ev-badge ev-badge-brand">
-          {role === 'Owner'
-            ? 'בעל עמדה'
-            : 'נהג'}
-        </span>
-      }
-    />
-
-    <div className="driver-profile-content screen-view">
+      <div className="driver-profile-content screen-view">
         {loading && (
           <div style={{ textAlign: 'center', color: 'var(--ev-ink-muted)', padding: '28px' }}>
             טוען פרטי פרופיל...
@@ -846,177 +924,200 @@ export default function UserProfileScreen() {
                   </p>
                 ) : (
                   <div style={{ display: 'grid', gap: '12px' }}>
-                    {vehicles.map((vehicle) => (
-                      <div
-                        key={vehicle.id}
-                        style={{
-                          background: '#FFFFFF',
-                          padding: '15px',
-                          borderRadius: '12px',
-                          border: '1px solid var(--ev-border)',
-                        }}
-                      >
-                        {editingVehicleId === vehicle.id ? (
-                          <form
-                            onSubmit={(e) => void handleSaveVehicleEdit(e, vehicle.id)}
-                            style={{ display: 'grid', gap: '12px' }}
-                          >
-                            <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label style={subtleLabelStyle}>דגם רכב</label>
-                              <input
-                                type="text"
-                                className="form-control"
-                                value={editModel}
-                                onChange={(e) => setEditModel(e.target.value)}
-                                required
-                              />
-                            </div>
+                    {vehicles.map((vehicle) => {
+                      const isActive = selectedVehicleId === vehicle.id;
+                      return (
+                        <div
+                          key={vehicle.id}
+                          style={{
+                            background: '#FFFFFF',
+                            padding: '15px',
+                            borderRadius: '12px',
+                            border: isActive
+                              ? '1.5px solid var(--ev-brand)'
+                              : '1px solid var(--ev-border)',
+                          }}
+                        >
+                          {editingVehicleId === vehicle.id ? (
+                            <form
+                              onSubmit={(e) => void handleSaveVehicleEdit(e, vehicle.id)}
+                              style={{ display: 'grid', gap: '12px' }}
+                            >
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label style={subtleLabelStyle}>דגם רכב</label>
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  value={editModel}
+                                  onChange={(e) => setEditModel(e.target.value)}
+                                  required
+                                />
+                              </div>
+                              <div
+                                style={{
+                                  display: 'grid',
+                                  gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                                  gap: '10px',
+                                }}
+                              >
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                  <label style={subtleLabelStyle}>סוג שקע</label>
+                                  <select
+                                    className="form-control"
+                                    value={editChargerType}
+                                    onChange={(e) =>
+                                      setEditChargerType(e.target.value as ChargerType)
+                                    }
+                                  >
+                                    <option value="CCS">CCS</option>
+                                    <option value="Type2">Type2</option>
+                                  </select>
+                                </div>
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                  <label style={subtleLabelStyle}>קיבולת סוללה (kWh)</label>
+                                  <input
+                                    type="number"
+                                    className="form-control tabular-nums"
+                                    min={1}
+                                    max={300}
+                                    value={editCapacityKwh}
+                                    onChange={(e) => setEditCapacityKwh(e.target.value)}
+                                    required
+                                  />
+                                </div>
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                  <label style={subtleLabelStyle}>סוללה נוכחית (%)</label>
+                                  <input
+                                    type="number"
+                                    className="form-control tabular-nums"
+                                    min={0}
+                                    max={100}
+                                    value={editCurrentBattery}
+                                    onChange={(e) => setEditCurrentBattery(e.target.value)}
+                                    required
+                                  />
+                                </div>
+                              </div>
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                  type="submit"
+                                  className="ev-btn ev-btn-auto"
+                                  disabled={savingVehicleEdit}
+                                >
+                                  {savingVehicleEdit ? 'שומר...' : 'שמור'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ev-btn ev-btn-secondary ev-btn-auto"
+                                  onClick={() => setEditingVehicleId(null)}
+                                >
+                                  ביטול
+                                </button>
+                              </div>
+                            </form>
+                          ) : (
                             <div
                               style={{
-                                display: 'grid',
-                                gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                flexWrap: 'wrap',
                                 gap: '10px',
                               }}
                             >
-                              <div className="form-group" style={{ marginBottom: 0 }}>
-                                <label style={subtleLabelStyle}>סוג שקע</label>
-                                <select
-                                  className="form-control"
-                                  value={editChargerType}
-                                  onChange={(e) =>
-                                    setEditChargerType(e.target.value as ChargerType)
-                                  }
+                              <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                  <span
+                                    style={{
+                                      fontWeight: 700,
+                                      fontSize: '1.02rem',
+                                      color: 'var(--ev-ink)',
+                                    }}
+                                  >
+                                    {vehicle.model}
+                                  </span>
+                                  {isActive && (
+                                    <span className="ev-badge ev-badge-brand">
+                                      פעיל לחיפוש
+                                    </span>
+                                  )}
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: '0.86rem',
+                                    color: 'var(--ev-ink-muted)',
+                                    marginTop: '4px',
+                                  }}
                                 >
-                                  <option value="CCS">CCS</option>
-                                  <option value="Type2">Type2</option>
-                                </select>
+                                  שקע: <strong style={{ color: 'var(--ev-ink)' }}>{vehicle.supportedChargerType}</strong>
+                                  {' · '}קיבולת:{' '}
+                                  <strong className="tabular-nums" style={{ color: 'var(--ev-ink)' }}>
+                                    {vehicle.batteryCapacityKwh} kWh
+                                  </strong>
+                                  {' · '}סוללה נוכחית:{' '}
+                                  <strong className="tabular-nums" style={{ color: 'var(--ev-brand)' }}>
+                                    {vehicle.currentBattery}%
+                                  </strong>
+                                </div>
                               </div>
-                              <div className="form-group" style={{ marginBottom: 0 }}>
-                                <label style={subtleLabelStyle}>קיבולת סוללה (kWh)</label>
-                                <input
-                                  type="number"
-                                  className="form-control tabular-nums"
-                                  min={1}
-                                  max={300}
-                                  value={editCapacityKwh}
-                                  onChange={(e) => setEditCapacityKwh(e.target.value)}
-                                  required
-                                />
-                              </div>
-                              <div className="form-group" style={{ marginBottom: 0 }}>
-                                <label style={subtleLabelStyle}>סוללה נוכחית (%)</label>
-                                <input
-                                  type="number"
-                                  className="form-control tabular-nums"
-                                  min={0}
-                                  max={100}
-                                  value={editCurrentBattery}
-                                  onChange={(e) => setEditCurrentBattery(e.target.value)}
-                                  required
-                                />
-                              </div>
-                            </div>
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                              <button
-                                type="submit"
-                                className="ev-btn ev-btn-auto"
-                                disabled={savingVehicleEdit}
-                              >
-                                {savingVehicleEdit ? 'שומר...' : 'שמור'}
-                              </button>
-                              <button
-                                type="button"
-                                className="ev-btn ev-btn-secondary ev-btn-auto"
-                                onClick={() => setEditingVehicleId(null)}
-                              >
-                                ביטול
-                              </button>
-                            </div>
-                          </form>
-                        ) : (
-                          <div
-                            style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              flexWrap: 'wrap',
-                              gap: '10px',
-                            }}
-                          >
-                            <div>
-                              <div
-                                style={{
-                                  fontWeight: 700,
-                                  fontSize: '1.02rem',
-                                  color: 'var(--ev-ink)',
-                                }}
-                              >
-                                {vehicle.model}
-                              </div>
-                              <div
-                                style={{
-                                  fontSize: '0.86rem',
-                                  color: 'var(--ev-ink-muted)',
-                                  marginTop: '4px',
-                                }}
-                              >
-                                שקע: <strong style={{ color: 'var(--ev-ink)' }}>{vehicle.supportedChargerType}</strong>
-                                {' · '}קיבולת:{' '}
-                                <strong className="tabular-nums" style={{ color: 'var(--ev-ink)' }}>
-                                  {vehicle.batteryCapacityKwh} kWh
-                                </strong>
-                                {' · '}סוללה נוכחית:{' '}
-                                <strong className="tabular-nums" style={{ color: 'var(--ev-brand)' }}>
-                                  {vehicle.currentBattery}%
-                                </strong>
-                              </div>
-                            </div>
 
-                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                              <button
-                                type="button"
-                                className="ev-btn ev-btn-secondary ev-btn-auto"
-                                style={{ padding: '6px 12px', fontSize: '0.84rem' }}
-                                onClick={() => startEditVehicle(vehicle)}
-                              >
-                                ערוך
-                              </button>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                {!isActive && (
+                                  <button
+                                    type="button"
+                                    className="ev-btn ev-btn-auto"
+                                    style={{ padding: '6px 12px', fontSize: '0.84rem' }}
+                                    onClick={() => handleSetActiveVehicle(vehicle)}
+                                  >
+                                    קבע כרכב פעיל
+                                  </button>
+                                )}
 
-                              {confirmDeleteId === vehicle.id ? (
-                                <>
+                                <button
+                                  type="button"
+                                  className="ev-btn ev-btn-secondary ev-btn-auto"
+                                  style={{ padding: '6px 12px', fontSize: '0.84rem' }}
+                                  onClick={() => startEditVehicle(vehicle)}
+                                >
+                                  ערוך
+                                </button>
+
+                                {confirmDeleteId === vehicle.id ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="ev-btn ev-btn-danger ev-btn-auto"
+                                      style={{ padding: '6px 12px', fontSize: '0.84rem' }}
+                                      disabled={deletingId === vehicle.id}
+                                      onClick={() => void handleDeleteVehicle(vehicle.id)}
+                                    >
+                                      {deletingId === vehicle.id ? 'מוחק...' : 'אשר מחיקה'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="ev-btn ev-btn-secondary ev-btn-auto"
+                                      style={{ padding: '6px 12px', fontSize: '0.84rem' }}
+                                      onClick={() => setConfirmDeleteId(null)}
+                                    >
+                                      בטל
+                                    </button>
+                                  </>
+                                ) : (
                                   <button
                                     type="button"
                                     className="ev-btn ev-btn-danger ev-btn-auto"
                                     style={{ padding: '6px 12px', fontSize: '0.84rem' }}
-                                    disabled={deletingId === vehicle.id}
-                                    onClick={() => void handleDeleteVehicle(vehicle.id)}
+                                    onClick={() => setConfirmDeleteId(vehicle.id)}
                                   >
-                                    {deletingId === vehicle.id ? 'מוחק...' : 'אשר מחיקה'}
+                                    מחק
                                   </button>
-                                  <button
-                                    type="button"
-                                    className="ev-btn ev-btn-secondary ev-btn-auto"
-                                    style={{ padding: '6px 12px', fontSize: '0.84rem' }}
-                                    onClick={() => setConfirmDeleteId(null)}
-                                  >
-                                    בטל
-                                  </button>
-                                </>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="ev-btn ev-btn-danger ev-btn-auto"
-                                  style={{ padding: '6px 12px', fontSize: '0.84rem' }}
-                                  onClick={() => setConfirmDeleteId(vehicle.id)}
-                                >
-                                  מחק
-                                </button>
-                              )}
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

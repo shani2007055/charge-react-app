@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { fetchStations, recommendStations } from '../store/stations/stationsThunks';
-import { setDriverLocation, setSearchBattery } from '../store/stations/stationsSlice';
+import {
+  setDriverLocation,
+  setSearchBattery,
+  setSelectedVehicle,
+} from '../store/stations/stationsSlice';
 import PageHeader from './ui/PageHeader';
 import { MapPin, ListFilter } from 'lucide-react';
 import VehicleSelector from './ui/VehicleSelector';
 import type { Vehicle } from '../types/Vehicle';
-import { setSelectedVehicle } from '../store/stations/stationsSlice';
 
 interface NominatimAddress {
   road?: string;
@@ -55,12 +58,52 @@ function formatCleanAddress(item: NominatimResult): string {
     .join(', ');
 }
 
+function getBatteryIndicator(val: number): {
+  estimatedRange: string;
+  statusText: string;
+  color: string;
+} {
+  const safeVal = Number.isFinite(val) ? Math.min(100, Math.max(0, val)) : 0;
+  const estimatedRange = `כ-${Math.round(safeVal * 3)} ק"מ`;
+
+  if (safeVal <= 15) {
+    return {
+      estimatedRange,
+      statusText: `מצב חירום — סוללה קריטית (${safeVal}%)`,
+      color: 'var(--ev-danger)',
+    };
+  }
+  if (safeVal <= 50) {
+    return {
+      estimatedRange,
+      statusText: `סוללה במצב בינוני (${safeVal}%)`,
+      color: 'var(--ev-warning)',
+    };
+  }
+  return {
+    estimatedRange,
+    statusText: `סוללה תקינה (${safeVal}%)`,
+    color: 'var(--ev-brand)',
+  };
+}
+
 export default function DriverSearchScreen() {
-  const [batteryLevel, setBatteryLevel] = useState<number>(50);
-  const [targetBattery, setTargetBattery] = useState<number>(80);
-  const [estimatedRange, setEstimatedRange] = useState<string>('כ-150 ק"מ');
-  const [batteryStatusText, setBatteryStatusText] = useState<string>('סוללה במצב בינוני (50%)');
-  const [batteryColor, setBatteryColor] = useState<string>('var(--ev-warning)');
+  const navigate = useNavigate();
+  const dispatch = useAppDispatch();
+  const {
+    loading,
+    selectedVehicleId,
+    currentBatteryPercent,
+    targetBatteryPercent,
+  } = useAppSelector((state) => state.stations);
+
+  const initialIndicator = getBatteryIndicator(currentBatteryPercent);
+
+  const [batteryLevel, setBatteryLevel] = useState<number>(currentBatteryPercent);
+  const [targetBattery, setTargetBattery] = useState<number>(targetBatteryPercent);
+  const [estimatedRange, setEstimatedRange] = useState<string>(initialIndicator.estimatedRange);
+  const [batteryStatusText, setBatteryStatusText] = useState<string>(initialIndicator.statusText);
+  const [batteryColor, setBatteryColor] = useState<string>(initialIndicator.color);
 
   const [locationText, setLocationText] = useState<string>('תל אביב');
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
@@ -77,22 +120,16 @@ export default function DriverSearchScreen() {
   // מונע פתיחה חוזרת של רשימת ההצעות מיד אחרי בחירה או זיהוי GPS
   const skipNextAutocompleteRef = useRef<boolean>(true);
 
-  const navigate = useNavigate();
-  const dispatch = useAppDispatch();
-const { loading } = useAppSelector(
-  state => state.stations
-);
-
-const [selectedVehicle, setVehicle] =
-  useState<Vehicle | null>(null);
+  const [selectedVehicle, setVehicle] = useState<Vehicle | null>(null);
   const isBusy = loading || searchingLocation;
 
   // חישוב אומדן טעינה ועלות מראש (צד לקוח בלבד)
   const neededPercent = Math.max(0, targetBattery - batteryLevel);
-const estimatedKwhNeeded =
-  (neededPercent / 100) *
-  (selectedVehicle?.batteryCapacityKwh ?? 60);  const estimatedCostNis = estimatedKwhNeeded * 1.58;
-  const estimatedMinutesFast = neededPercent === 0 ? 0 : Math.max(5, Math.round((estimatedKwhNeeded / 90) * 60));
+  const estimatedKwhNeeded =
+    (neededPercent / 100) * (selectedVehicle?.batteryCapacityKwh ?? 60);
+  const estimatedCostNis = estimatedKwhNeeded * 1.58;
+  const estimatedMinutesFast =
+    neededPercent === 0 ? 0 : Math.max(5, Math.round((estimatedKwhNeeded / 90) * 60));
 
   useEffect(() => {
     if (skipNextAutocompleteRef.current) {
@@ -157,75 +194,92 @@ const estimatedKwhNeeded =
     setErrorMessage('');
   };
 
-  function updateBattery(val: number) {
+  const applyBatteryUpdate = useCallback(
+    (val: number, overrideTarget?: number) => {
+      const meta = getBatteryIndicator(val);
+      setBatteryLevel(val);
+      setEstimatedRange(meta.estimatedRange);
+      setBatteryStatusText(meta.statusText);
+      setBatteryColor(meta.color);
 
-  setBatteryLevel(val);
-
-  setEstimatedRange(
-    `כ-${Math.round(val * 3)} ק"מ`
+      const nextTarget = overrideTarget ?? targetBattery;
+      if (overrideTarget !== undefined) {
+        setTargetBattery(overrideTarget);
+      }
+      if (Number.isFinite(val) && Number.isFinite(nextTarget)) {
+        dispatch(
+          setSearchBattery({
+            currentBatteryPercent: val,
+            targetBatteryPercent: nextTarget,
+          })
+        );
+      }
+    },
+    [dispatch, targetBattery]
   );
 
-  if (val <= 15) {
-    setBatteryStatusText(
-      `מצב חירום — סוללה קריטית (${val}%)`
-    );
+  const handleBatteryChange = (e: ChangeEvent<HTMLInputElement>) => {
+    applyBatteryUpdate(Number(e.target.value));
+  };
 
-    setBatteryColor('var(--ev-danger)');
+  const handleTargetBatteryChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const nextTarget = Number(e.target.value);
+    setTargetBattery(nextTarget);
+    if (Number.isFinite(nextTarget) && Number.isFinite(batteryLevel)) {
+      dispatch(
+        setSearchBattery({
+          currentBatteryPercent: batteryLevel,
+          targetBatteryPercent: nextTarget,
+        })
+      );
+    }
+  };
 
-  } else if (val <= 50) {
+  function handleVehicleSelect(vehicle: Vehicle | null) {
+    setVehicle(vehicle);
+    dispatch(setSelectedVehicle(vehicle?.id ?? null));
 
-    setBatteryStatusText(
-      `סוללה במצב בינוני (${val}%)`
-    );
-
-    setBatteryColor('var(--ev-warning)');
-
-  } else {
-
-    setBatteryStatusText(
-      `סוללה תקינה (${val}%)`
-    );
-
-    setBatteryColor('var(--ev-brand)');
+    if (vehicle) {
+      const nextTarget = Math.min(100, Math.max(80, vehicle.currentBattery + 10));
+      applyBatteryUpdate(vehicle.currentBattery, nextTarget);
+      setChargerType(vehicle.supportedChargerType);
+      setErrorMessage('');
+    } else {
+      setChargerType('');
+    }
   }
-}
 
-const handleBatteryChange = (
-  e: ChangeEvent<HTMLInputElement>
-) => {
-  updateBattery(Number(e.target.value));
-};
+  const handleVehiclesLoaded = useCallback(
+    (loadedVehicles: Vehicle[]) => {
+      if (loadedVehicles.length === 0) {
+        setVehicle(null);
+        if (selectedVehicleId !== null) {
+          dispatch(setSelectedVehicle(null));
+        }
+        return;
+      }
 
-function handleVehicleSelect(
-  vehicle: Vehicle | null
-) {
-  setVehicle(vehicle);
+      const matched =
+        selectedVehicleId !== null
+          ? loadedVehicles.find((v) => v.id === selectedVehicleId) ?? null
+          : null;
 
-  dispatch(
-    setSelectedVehicle(vehicle?.id ?? null)
+      if (matched) {
+        setVehicle(matched);
+        setChargerType((prev) => prev || matched.supportedChargerType);
+        return;
+      }
+
+      const fallbackVehicle = loadedVehicles[0];
+      const nextTarget = Math.min(100, Math.max(80, fallbackVehicle.currentBattery + 10));
+      setVehicle(fallbackVehicle);
+      dispatch(setSelectedVehicle(fallbackVehicle.id));
+      applyBatteryUpdate(fallbackVehicle.currentBattery, nextTarget);
+      setChargerType(fallbackVehicle.supportedChargerType);
+    },
+    [applyBatteryUpdate, dispatch, selectedVehicleId]
   );
 
-  if (vehicle) {
-
-    updateBattery(vehicle.currentBattery);
-
-    setChargerType(
-      vehicle.supportedChargerType
-    );
-
-    setTargetBattery(
-      Math.min(
-        100,
-        Math.max(80, vehicle.currentBattery + 10)
-      )
-    );
-
-    setErrorMessage('');
-
-  } else {
-    setChargerType('');
-  }
-}
   function handleDetectLocation() {
     setErrorMessage('');
     setSuggestions([]);
@@ -340,33 +394,26 @@ function handleVehicleSelect(
 
   async function runRecommendation(overrideBattery?: number) {
     if (!selectedVehicle) {
-  setErrorMessage('יש לבחור רכב לפני חיפוש מותאם.');
-  return;
-}
+      setErrorMessage('יש לבחור רכב לפני חיפוש מותאם.');
+      return;
+    }
 
-const requestedBattery =
-  overrideBattery ?? batteryLevel;
+    const requestedBattery = overrideBattery ?? batteryLevel;
 
-if (
-  !Number.isFinite(requestedBattery) ||
-  requestedBattery < 0 ||
-  requestedBattery >= 100
-) {
-  setErrorMessage(
-    'יש להזין מצב סוללה תקין הנמוך מ-100%.'
-  );
-  return;
-}
+    if (
+      !Number.isFinite(requestedBattery) ||
+      requestedBattery < 0 ||
+      requestedBattery >= 100
+    ) {
+      setErrorMessage('יש להזין מצב סוללה תקין הנמוך מ-100%.');
+      return;
+    }
 
-if (
-  targetBattery <= requestedBattery ||
-  targetBattery > 100
-) {
-  setErrorMessage(
-    'יעד הטעינה חייב להיות גבוה ממצב הסוללה הנוכחי.'
-  );
-  return;
-}
+    if (targetBattery <= requestedBattery || targetBattery > 100) {
+      setErrorMessage('יעד הטעינה חייב להיות גבוה ממצב הסוללה הנוכחי.');
+      return;
+    }
+
     setErrorMessage('');
     setSuggestions([]);
     const actualBattery = overrideBattery ?? batteryLevel;
@@ -420,337 +467,340 @@ if (
   }
 
   return (
-  <div className="dash-page" dir="rtl">
+    <div className="dash-page" dir="rtl">
+      <PageHeader
+        title="לאן נוסעים היום?"
+        description="מצאו את עמדת הטעינה שמתאימה בדיוק לצרכים שלכם"
+        icon={MapPin}
+        actions={
+          <button
+            type="button"
+            className="ev-btn ev-btn-secondary ev-btn-auto"
+            disabled={isBusy}
+            onClick={handleShowAllStations}
+          >
+            <ListFilter size={18} />
+            הצגת כל העמדות
+          </button>
+        }
+      />
 
-    <PageHeader
-      title="לאן נוסעים היום?"
-      description="מצאו את עמדת הטעינה שמתאימה בדיוק לצרכים שלכם"
-      icon={MapPin}
-      actions={
-        <button
-          type="button"
-          className="ev-btn ev-btn-secondary ev-btn-auto"
-          disabled={isBusy}
-          onClick={handleShowAllStations}
-        >
-          <ListFilter size={18} />
-          הצגת כל העמדות
-        </button>
-      }
-    />
-
-    <div className="dash-search-grid">
-
-      {/* פאנל החיפוש המרכזי */}
-      <div className="screen-view" style={{ flex: '2 1 500px' }}>
-        <div className="screen-header">
-          <div>
-            <div>חיפוש והתאמת עמדת טעינה</div>
-            <p className="ev-subtitle">הזן מיקום ומצב סוללה לחישוב העמדה המדויקת ביותר עבורך</p>
+      <div className="dash-search-grid">
+        {/* פאנל החיפוש המרכזי */}
+        <div className="screen-view" style={{ flex: '2 1 500px' }}>
+          <div className="screen-header">
+            <div>
+              <div>חיפוש והתאמת עמדת טעינה</div>
+              <p className="ev-subtitle">הזן מיקום ומצב סוללה לחישוב העמדה המדויקת ביותר עבורך</p>
+            </div>
           </div>
-        </div>
 
-        {errorMessage && <div className="ev-alert-error">{errorMessage}</div>}
+          {errorMessage && <div className="ev-alert-error">{errorMessage}</div>}
 
-        <form onSubmit={handleSubmit}>
-          <VehicleSelector
-  selectedId={selectedVehicle?.id ?? null}
-  onSelect={handleVehicleSelect}
-  disabled={isBusy}
-/>
-          <div className="form-group" style={{ position: 'relative' }}>
-            <label>מיקום נוכחי או כתובת יעד</label>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <input
-                type="text"
-                className="form-control"
-                placeholder="לדוגמה: רוטשילד 50 פתח תקווה"
-                value={locationText}
-                onChange={(e) => {
-                  setLocationText(e.target.value);
-                  setGpsCoords(null);
-                }}
-              />
-              <button
-                type="button"
-                className="ev-btn ev-btn-secondary ev-btn-auto"
-                disabled={detectingLocation}
-                onClick={handleDetectLocation}
-              >
-                {detectingLocation ? 'מאתר...' : 'זהה מיקום'}
-              </button>
+          <form onSubmit={handleSubmit}>
+            <VehicleSelector
+              selectedId={selectedVehicle?.id ?? selectedVehicleId}
+              onSelect={handleVehicleSelect}
+              onVehiclesLoaded={handleVehiclesLoaded}
+              disabled={isBusy}
+            />
+
+            <div className="form-group" style={{ position: 'relative' }}>
+              <label>מיקום נוכחי או כתובת יעד</label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="לדוגמה: רוטשילד 50 פתח תקווה"
+                  value={locationText}
+                  onChange={(e) => {
+                    setLocationText(e.target.value);
+                    setGpsCoords(null);
+                  }}
+                />
+                <button
+                  type="button"
+                  className="ev-btn ev-btn-secondary ev-btn-auto"
+                  disabled={detectingLocation}
+                  onClick={handleDetectLocation}
+                >
+                  {detectingLocation ? 'מאתר...' : 'זהה מיקום'}
+                </button>
+              </div>
+
+              {loadingSuggestions && (
+                <div
+                  style={{
+                    fontSize: '0.78rem',
+                    color: 'var(--ev-ink-soft)',
+                    marginTop: '6px',
+                  }}
+                >
+                  מחפש הצעות כתובות...
+                </div>
+              )}
+
+              {suggestions.length > 0 && (
+                <ul
+                  style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    zIndex: 20,
+                    background: 'var(--ev-surface)',
+                    border: '1px solid var(--ev-border)',
+                    borderRadius: '10px',
+                    listStyle: 'none',
+                    margin: '6px 0 0 0',
+                    padding: 0,
+                    maxHeight: '220px',
+                    overflowY: 'auto',
+                    boxShadow: '0 10px 25px rgba(15, 23, 42, 0.1)',
+                  }}
+                >
+                  {suggestions.map((item) => (
+                    <li
+                      key={item.id}
+                      onClick={() => handleSelectSuggestion(item)}
+                      style={{
+                        padding: '10px 14px',
+                        fontSize: '0.88rem',
+                        color: 'var(--ev-ink)',
+                        textAlign: 'right',
+                        cursor: 'pointer',
+                        borderBottom: '1px solid var(--ev-surface-subtle)',
+                      }}
+                    >
+                      {item.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
 
-            {loadingSuggestions && (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: '12px',
+              }}
+            >
+              <div className="form-group">
+                <label>סוללה נוכחית (%)</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  className="form-control tabular-nums"
+                  value={batteryLevel}
+                  onChange={handleBatteryChange}
+                />
+              </div>
+              <div className="form-group">
+                <label>יעד טעינה רצוי (%)</label>
+                <input
+                  type="number"
+                  min={10}
+                  max={100}
+                  className="form-control tabular-nums"
+                  value={targetBattery}
+                  onChange={handleTargetBatteryChange}
+                />
+              </div>
+            </div>
+
+            {/* חיווי מצב סוללה נקי */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '14px',
+                background: 'var(--ev-bg)',
+                padding: '12px 14px',
+                borderRadius: '10px',
+                border: '1px solid var(--ev-border)',
+                marginBottom: '16px',
+              }}
+            >
               <div
                 style={{
-                  fontSize: '0.78rem',
-                  color: 'var(--ev-ink-soft)',
-                  marginTop: '6px',
+                  flex: '0 0 88px',
+                  height: '10px',
+                  background: '#e2e8f0',
+                  borderRadius: '999px',
+                  overflow: 'hidden',
                 }}
               >
-                מחפש הצעות כתובות...
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${Math.min(Math.max(batteryLevel, 0), 100)}%`,
+                    background: batteryColor,
+                    transition: 'width 0.3s ease, background 0.3s ease',
+                  }}
+                />
+              </div>
+              <span
+                className="tabular-nums"
+                style={{ fontSize: '0.84rem', color: 'var(--ev-ink)', fontWeight: 600 }}
+              >
+                {batteryStatusText} · {estimatedRange}
+              </span>
+            </div>
+
+            {batteryLevel <= 20 && (
+              <div
+                style={{
+                  background: 'var(--ev-danger-soft)',
+                  padding: '12px 14px',
+                  borderRadius: '10px',
+                  marginBottom: '16px',
+                  border: '1px solid var(--ev-danger-border)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '12px',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <span style={{ fontSize: '0.84rem', color: '#991b1b', fontWeight: 500 }}>
+                  סוללה מתחת ל-20% — אפשר להפעיל איתור חירום לעמדה הקרובה ביותר
+                </span>
+                <button
+                  type="button"
+                  className="ev-btn ev-btn-auto"
+                  disabled={isBusy}
+                  style={{ background: 'var(--ev-danger)' }}
+                  onClick={() => runRecommendation(Math.min(batteryLevel, 10))}
+                >
+                  מצא עמדה מיידית (חירום)
+                </button>
               </div>
             )}
 
-            {suggestions.length > 0 && (
-              <ul
-                style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  right: 0,
-                  zIndex: 20,
-                  background: 'var(--ev-surface)',
-                  border: '1px solid var(--ev-border)',
-                  borderRadius: '10px',
-                  listStyle: 'none',
-                  margin: '6px 0 0 0',
-                  padding: 0,
-                  maxHeight: '220px',
-                  overflowY: 'auto',
-                  boxShadow: '0 10px 25px rgba(15, 23, 42, 0.1)',
-                }}
-              >
-                {suggestions.map((item) => (
-                  <li
-                    key={item.id}
-                    onClick={() => handleSelectSuggestion(item)}
-                    style={{
-                      padding: '10px 14px',
-                      fontSize: '0.88rem',
-                      color: 'var(--ev-ink)',
-                      textAlign: 'right',
-                      cursor: 'pointer',
-                      borderBottom: '1px solid var(--ev-surface-subtle)',
-                    }}
-                  >
-                    {item.label}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-              gap: '12px',
-            }}
-          >
-            <div className="form-group">
-              <label>סוללה נוכחית (%)</label>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                className="form-control tabular-nums"
-                value={batteryLevel}
-                onChange={handleBatteryChange}
-              />
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                gap: '12px',
+              }}
+            >
+              <div className="form-group">
+                <label>זמן פנוי (דקות)</label>
+                <input
+                  type="number"
+                  min={15}
+                  max={360}
+                  className="form-control tabular-nums"
+                  value={availableTimeMinutes}
+                  onChange={(e) => setAvailableTimeMinutes(Number(e.target.value))}
+                />
+              </div>
+              <div className="form-group">
+                <label>סוג שקע</label>
+                <select
+                  className="form-control"
+                  value={chargerType}
+                  onChange={(e) => setChargerType(e.target.value)}
+                >
+                  <option value="">הכול (לא משנה)</option>
+                  <option value="CCS">CCS (מהיר)</option>
+                  <option value="Type2">Type2</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label>סדר עדיפויות</label>
+                <select
+                  className="form-control"
+                  value={priority}
+                  onChange={(e) => setPriority(e.target.value)}
+                >
+                  <option value="balanced">איזון חכם</option>
+                  <option value="distance">הכי קרובה (מרחק)</option>
+                  <option value="rating">דירוג וביקורות גבוהות</option>
+                  <option value="price">מחיר הזול ביותר</option>
+                  <option value="speed">התאמת מהירות טעינה (kW)</option>
+                </select>
+              </div>
             </div>
-            <div className="form-group">
-              <label>יעד טעינה רצוי (%)</label>
-              <input
-                type="number"
-                min={10}
-                max={100}
-                className="form-control tabular-nums"
-                value={targetBattery}
-                onChange={(e) => setTargetBattery(Number(e.target.value))}
-              />
-            </div>
-          </div>
 
-          {/* חיווי מצב סוללה נקי */}
+            <div
+              style={{
+                fontSize: '0.78rem',
+                color: 'var(--ev-ink-soft)',
+                marginTop: '-6px',
+                marginBottom: '12px',
+              }}
+            >
+              {getPriorityHint(priority)}
+            </div>
+
+            <button type="submit" className="btn" disabled={isBusy} style={{ marginTop: '6px' }}>
+              {isBusy ? 'מאתר ומחשב התאמה...' : 'חשב עמדה אופטימלית'}
+            </button>
+          </form>
+        </div>
+
+        {/* כרטיס אומדן טעינה ועלות מראש */}
+        <aside className="ev-card" style={{ flex: '1 1 280px' }}>
+          <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--ev-brand)' }}>
+            אומדן לפני יציאה
+          </div>
+          <h3 style={{ margin: '4px 0 4px 0', fontSize: '1.05rem', fontWeight: 700 }}>
+            תכנון טעינה משוער
+          </h3>
+          <p style={{ margin: '0 0 16px 0', fontSize: '0.8rem', color: 'var(--ev-ink-soft)' }}>
+            מתעדכן אוטומטית לפי הסוללה הנוכחית והיעד שבחרת
+          </p>
+
           <div
             style={{
               display: 'flex',
-              alignItems: 'center',
-              gap: '14px',
-              background: 'var(--ev-bg)',
-              padding: '12px 14px',
-              borderRadius: '10px',
-              border: '1px solid var(--ev-border)',
-              marginBottom: '16px',
-            }}
-          >
-            <div
-              style={{
-                flex: '0 0 88px',
-                height: '10px',
-                background: '#e2e8f0',
-                borderRadius: '999px',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                style={{
-                  height: '100%',
-                  width: `${Math.min(Math.max(batteryLevel, 0), 100)}%`,
-                  background: batteryColor,
-                  transition: 'width 0.3s ease, background 0.3s ease',
-                }}
-              />
-            </div>
-            <span
-              className="tabular-nums"
-              style={{ fontSize: '0.84rem', color: 'var(--ev-ink)', fontWeight: 600 }}
-            >
-              {batteryStatusText} · {estimatedRange}
-            </span>
-          </div>
-
-          {batteryLevel <= 20 && (
-            <div
-              style={{
-                background: 'var(--ev-danger-soft)',
-                padding: '12px 14px',
-                borderRadius: '10px',
-                marginBottom: '16px',
-                border: '1px solid var(--ev-danger-border)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '12px',
-                flexWrap: 'wrap',
-              }}
-            >
-              <span style={{ fontSize: '0.84rem', color: '#991b1b', fontWeight: 500 }}>
-                סוללה מתחת ל-20% — אפשר להפעיל איתור חירום לעמדה הקרובה ביותר
-              </span>
-              <button
-                type="button"
-                className="ev-btn ev-btn-auto"
-                disabled={isBusy}
-                style={{ background: 'var(--ev-danger)' }}
-                onClick={() => runRecommendation(Math.min(batteryLevel, 10))}
-              >
-                מצא עמדה מיידית (חירום)
-              </button>
-            </div>
-          )}
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+              flexDirection: 'column',
               gap: '12px',
+              paddingTop: '14px',
+              borderTop: '1px solid var(--ev-surface-subtle)',
             }}
           >
-            <div className="form-group">
-              <label>זמן פנוי (דקות)</label>
-              <input
-                type="number"
-                min={15}
-                max={360}
-                className="form-control tabular-nums"
-                value={availableTimeMinutes}
-                onChange={(e) => setAvailableTimeMinutes(Number(e.target.value))}
-              />
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem' }}>
+              <span style={{ color: 'var(--ev-ink-muted)' }}>תוספת אנרגיה נדרשת</span>
+              <span className="font-mono-num" style={{ fontWeight: 600 }}>
+                {estimatedKwhNeeded.toFixed(1)} kWh
+              </span>
             </div>
-            <div className="form-group">
-              <label>סוג שקע</label>
-              <select
-                className="form-control"
-                value={chargerType}
-                onChange={(e) => setChargerType(e.target.value)}
-              >
-                <option value="">הכול (לא משנה)</option>
-                <option value="CCS">CCS (מהיר)</option>
-                <option value="Type2">Type2</option>
-              </select>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem' }}>
+              <span style={{ color: 'var(--ev-ink-muted)' }}>זמן משוער (טעינה מהירה)</span>
+              <span className="font-mono-num" style={{ fontWeight: 600 }}>
+                ~{estimatedMinutesFast} דק&apos;
+              </span>
             </div>
-            <div className="form-group">
-              <label>סדר עדיפויות</label>
-              <select
-                className="form-control"
-                value={priority}
-                onChange={(e) => setPriority(e.target.value)}
-              >
-                <option value="balanced">איזון חכם</option>
-                <option value="distance">הכי קרובה (מרחק)</option>
-                <option value="rating">דירוג וביקורות גבוהות</option>
-                <option value="price">מחיר הזול ביותר</option>
-                <option value="speed">התאמת מהירות טעינה (kW)</option>
-              </select>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+              <span style={{ color: 'var(--ev-ink-muted)' }}>עלות משוערת ממוצעת</span>
+              <span className="font-mono-num" style={{ fontWeight: 700, color: 'var(--ev-brand)' }}>
+                ₪{estimatedCostNis.toFixed(1)}
+              </span>
             </div>
           </div>
 
           <div
             style={{
-              fontSize: '0.78rem',
+              marginTop: '16px',
+              paddingTop: '12px',
+              borderTop: '1px solid var(--ev-surface-subtle)',
+              fontSize: '0.76rem',
               color: 'var(--ev-ink-soft)',
-              marginTop: '-6px',
-              marginBottom: '12px',
+              lineHeight: 1.55,
             }}
           >
-            {getPriorityHint(priority)}
+            האומדן מחושב לפי{' '}
+            {selectedVehicle
+              ? `קיבולת הרכב הנבחר (${selectedVehicle.batteryCapacityKwh} kWh)`
+              : 'סוללה ממוצעת (60 kWh)'}{' '}
+            ותעריף שוק של ₪1.58 לקוט&quot;ש. המחיר הסופי נקבע לפי התחנה שתבחר.
           </div>
-
-          <button type="submit" className="btn" disabled={isBusy} style={{ marginTop: '6px' }}>
-            {isBusy ? 'מאתר ומחשב התאמה...' : 'חשב עמדה אופטימלית'}
-          </button>
-        </form>
+        </aside>
       </div>
-
-      {/* כרטיס אומדן טעינה ועלות מראש */}
-      <aside className="ev-card" style={{ flex: '1 1 280px' }}>
-        <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--ev-brand)' }}>
-          אומדן לפני יציאה
-        </div>
-        <h3 style={{ margin: '4px 0 4px 0', fontSize: '1.05rem', fontWeight: 700 }}>
-          תכנון טעינה משוער
-        </h3>
-        <p style={{ margin: '0 0 16px 0', fontSize: '0.8rem', color: 'var(--ev-ink-soft)' }}>
-          מתעדכן אוטומטית לפי הסוללה הנוכחית והיעד שבחרת
-        </p>
-
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px',
-            paddingTop: '14px',
-            borderTop: '1px solid var(--ev-surface-subtle)',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem' }}>
-            <span style={{ color: 'var(--ev-ink-muted)' }}>תוספת אנרגיה נדרשת</span>
-            <span className="font-mono-num" style={{ fontWeight: 600 }}>
-              {estimatedKwhNeeded.toFixed(1)} kWh
-            </span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.88rem' }}>
-            <span style={{ color: 'var(--ev-ink-muted)' }}>זמן משוער (טעינה מהירה)</span>
-            <span className="font-mono-num" style={{ fontWeight: 600 }}>
-              ~{estimatedMinutesFast} דק&apos;
-            </span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
-            <span style={{ color: 'var(--ev-ink-muted)' }}>עלות משוערת ממוצעת</span>
-            <span className="font-mono-num" style={{ fontWeight: 700, color: 'var(--ev-brand)' }}>
-              ₪{estimatedCostNis.toFixed(1)}
-            </span>
-          </div>
-        </div>
-
-        <div
-          style={{
-            marginTop: '16px',
-            paddingTop: '12px',
-            borderTop: '1px solid var(--ev-surface-subtle)',
-            fontSize: '0.76rem',
-            color: 'var(--ev-ink-soft)',
-            lineHeight: 1.55,
-          }}
-        >
-          האומדן מחושב לפי סוללה ממוצעת (60 kWh) ותעריף שוק של ₪1.58 לקוט&quot;ש. המחיר הסופי
-          נקבע לפי התחנה שתבחר.
-        </div>
-      </aside>
-    </div>
     </div>
   );
 }

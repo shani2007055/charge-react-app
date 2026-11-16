@@ -6,6 +6,7 @@ import type { Station } from '../store/stations/stationsState';
 import type { Vehicle } from '../types/Vehicle';
 import PageHeader from './ui/PageHeader';
 import StatusBadge from './ui/StatusBadge';
+import StationNavigation from './ui/StationNavigation';
 import './ui/DriverDashboard.css';
 
 interface ChargeBooking {
@@ -291,6 +292,7 @@ export default function ActiveSessionScreen() {
   const currentStepIndex = booking
     ? BOOKING_STEPS.findIndex((step) => step.id === booking.status)
     : -1;
+  const activeStation = booking ? stationsById[booking.stationId] : undefined;
 
   return (
     <div className="dash-page" dir="rtl">
@@ -477,6 +479,27 @@ export default function ActiveSessionScreen() {
               </div>
             )}
 
+            {/* ניווט אל העמדה בזמן שהשריון פעיל */}
+            {booking.status === 'Held' && (
+              <div
+                style={{
+                  padding: '14px 16px',
+                  borderRadius: '12px',
+                  background: '#F8FAFC',
+                  border: '1px solid var(--ev-border)',
+                }}
+              >
+                <div style={{ fontSize: '0.86rem', fontWeight: 600, color: 'var(--ev-ink)' }}>
+                  ניווט אל העמדה
+                </div>
+                <StationNavigation
+                  latitude={activeStation?.latitude}
+                  longitude={activeStation?.longitude}
+                  address={booking.stationAddress}
+                />
+              </div>
+            )}
+
             {/* חיווי כשהרכב בשלב טעינה */}
             {booking.status === 'Charging' && (
               <div
@@ -515,26 +538,15 @@ export default function ActiveSessionScreen() {
             {/* כפתורי פעולה */}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
               {booking.status === 'Held' && (
-                <>
-                  <a
-                    href={`https://waze.com/ul?q=${encodeURIComponent(booking.stationAddress)}&navigate=yes`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="ev-btn ev-btn-secondary"
-                    style={{ flex: '1 1 180px', textDecoration: 'none' }}
-                  >
-                    פתח ניווט ב-Waze
-                  </a>
-                  <button
-                    type="button"
-                    className="ev-btn"
-                    style={{ flex: '1 1 180px' }}
-                    disabled={updating}
-                    onClick={() => void changeStatus('Confirmed')}
-                  >
-                    {updating ? 'מעדכן...' : 'הגעתי לעמדה (אשר הגעה)'}
-                  </button>
-                </>
+                <button
+                  type="button"
+                  className="ev-btn"
+                  style={{ flex: '1 1 200px' }}
+                  disabled={updating}
+                  onClick={() => void changeStatus('Confirmed')}
+                >
+                  {updating ? 'מעדכן...' : 'הגעתי לעמדה (אשר הגעה)'}
+                </button>
               )}
 
               {booking.status === 'Confirmed' && (
@@ -560,6 +572,14 @@ export default function ActiveSessionScreen() {
                   {updating ? 'מסיים...' : 'סיימתי טעינה — עבור לדירוג'}
                 </button>
               )}
+
+              <button
+                type="button"
+                className="ev-btn ev-btn-secondary ev-btn-auto"
+                onClick={() => navigate(`/stations/${booking.stationId}`)}
+              >
+                פרטי תחנה
+              </button>
 
               {(booking.status === 'Held' || booking.status === 'Confirmed') && (
                 <button
