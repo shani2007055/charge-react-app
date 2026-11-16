@@ -422,7 +422,6 @@ export default function DriverSearchScreen() {
 
     setErrorMessage('');
     setSuggestions([]);
-    setHoveredSuggestionId(null);
     const actualBattery = overrideBattery ?? batteryLevel;
     const safeTarget = targetBattery;
     dispatch(setSearchBattery({ currentBatteryPercent: actualBattery, targetBatteryPercent: safeTarget }));
@@ -461,7 +460,6 @@ export default function DriverSearchScreen() {
   async function handleShowAllStations() {
     setErrorMessage('');
     setSuggestions([]);
-    setHoveredSuggestionId(null);
     const safeTarget = Math.max(targetBattery, Math.min(batteryLevel + 10, 100));
     dispatch(setSearchBattery({ currentBatteryPercent: batteryLevel, targetBatteryPercent: safeTarget }));
     dispatch(setDriverLocation(gpsCoords));
@@ -721,8 +719,8 @@ export default function DriverSearchScreen() {
                   onChange={(e) => setChargerType(e.target.value)}
                 >
                   <option value="">הכול (לא משנה)</option>
-                  <option value="CCS">CCS (מהיר)</option>
                   <option value="Type2">Type2</option>
+                  <option value="CCS">CCS (מהיר)</option>
                 </select>
               </div>
               <div className="form-group">

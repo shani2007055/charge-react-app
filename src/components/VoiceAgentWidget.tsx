@@ -290,7 +290,7 @@ export default function VoiceAgentWidget() {
             model: carModel || 'Tesla Model 3',
             batteryCapacityKwh: 75,
             currentBattery: currentBatteryPercent,
-            supportedChargerType: station.chargerType || 'CCS',
+            supportedChargerType: station.chargerType || 'Type2',
           }),
         });
         vehicles = [created];
