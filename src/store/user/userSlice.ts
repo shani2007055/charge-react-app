@@ -1,12 +1,9 @@
-
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import { initialState } from './userState';
-
+import { initialState, type UserRole } from './userState';
 import {
   setCarModelReducer,
   addCommunityPointsReducer
 } from './userReducers';
-
 import {
   loginUser,
   registerUser,
@@ -34,7 +31,6 @@ const clearUserFields = (state: typeof initialState) => {
   state.token = null;
   state.error = null;
   state.loading = false;
-
   localStorage.removeItem('token');
   localStorage.removeItem('user_session');
 };
@@ -57,7 +53,6 @@ const fulfilled = (
   state.token = action.payload.token;
   state.error = null;
   state.sessionExpiredMessage = null;
-
   saveSession(
     state.id,
     state.name,
@@ -69,18 +64,14 @@ const fulfilled = (
 const userSlice = createSlice({
   name: 'user',
   initialState,
-
   reducers: {
     setCarModel: setCarModelReducer,
-
     addCommunityPoints: addCommunityPointsReducer,
-
-    updateUserName: (
+    setActiveRole: (
       state,
-      action: PayloadAction<string>
+      action: PayloadAction<UserRole>
     ) => {
-      state.name = action.payload;
-
+      state.role = action.payload;
       saveSession(
         state.id,
         state.name,
@@ -88,26 +79,33 @@ const userSlice = createSlice({
         state.role
       );
     },
-
+    updateUserName: (
+      state,
+      action: PayloadAction<string>
+    ) => {
+      state.name = action.payload;
+      saveSession(
+        state.id,
+        state.name,
+        state.email,
+        state.role
+      );
+    },
     logout: state => {
       clearUserFields(state);
       state.sessionExpiredMessage = null;
     },
-
     expireSession: state => {
       clearUserFields(state);
       state.sessionExpiredMessage =
         'פג תוקף ההתחברות. יש להתחבר מחדש.';
     },
-
     clearSessionExpiredMessage: state => {
       state.sessionExpiredMessage = null;
     }
   },
-
   extraReducers: builder => {
     builder
-
       .addCase(loginUser.pending, pending)
       .addCase(loginUser.fulfilled, fulfilled)
       .addCase(loginUser.rejected, (state, action) => {
@@ -115,7 +113,6 @@ const userSlice = createSlice({
         state.error =
           action.error.message ?? 'שגיאה בהתחברות';
       })
-
       .addCase(registerUser.pending, pending)
       .addCase(registerUser.fulfilled, fulfilled)
       .addCase(registerUser.rejected, (state, action) => {
@@ -123,7 +120,6 @@ const userSlice = createSlice({
         state.error =
           action.error.message ?? 'שגיאה בהרשמה';
       })
-
       .addCase(switchUserRole.pending, pending)
       .addCase(switchUserRole.fulfilled, fulfilled)
       .addCase(switchUserRole.rejected, (state, action) => {
@@ -137,6 +133,7 @@ const userSlice = createSlice({
 export const {
   setCarModel,
   addCommunityPoints,
+  setActiveRole,
   updateUserName,
   logout,
   expireSession,

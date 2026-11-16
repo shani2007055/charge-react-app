@@ -1,11 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  CarFront,
-  BatteryCharging,
-  Zap,
-  Plug,
-  PlusCircle,
-} from 'lucide-react';
+import { CarFront, PlusCircle } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../../api/apiClient';
 import type { Vehicle } from '../../types/Vehicle';
@@ -69,18 +63,27 @@ export default function VehicleSelector({
 
   return (
     <section className="vehicle-selector">
-      <div className="vehicle-selector-header">
-        <span className="vehicle-selector-icon">
-          <CarFront size={26} />
-        </span>
-        <div>
-          <h3>הרכב שלי</h3>
-          <p>בחרו רכב לחיפוש עמדת טעינה מתאימה</p>
-        </div>
+      <div className="vehicle-selector-top">
+        <label htmlFor="search-vehicle" className="vehicle-selector-title">
+          <CarFront size={18} />
+          <span>הרכב שלי</span>
+        </label>
+
+        <button
+          type="button"
+          className="vehicle-manage-btn"
+          disabled={disabled}
+          onClick={() => navigate('/profile')}
+        >
+          <PlusCircle size={15} />
+          הוספה וניהול רכבים
+        </button>
       </div>
 
       {loading ? (
-        <p role="status">טוען את הרכבים שלך...</p>
+        <p className="vehicle-status" role="status">
+          טוען את הרכבים שלך...
+        </p>
       ) : error ? (
         <div className="ev-alert-error">{error}</div>
       ) : vehicles.length === 0 ? (
@@ -89,7 +92,6 @@ export default function VehicleSelector({
         </div>
       ) : (
         <>
-          <label htmlFor="search-vehicle">בחירת רכב</label>
           <select
             id="search-vehicle"
             className="form-control"
@@ -105,42 +107,20 @@ export default function VehicleSelector({
             <option value="">יש לבחור רכב</option>
             {vehicles.map((vehicle) => (
               <option key={vehicle.id} value={vehicle.id}>
-                {vehicle.model}
+                {vehicle.model} · {vehicle.batteryCapacityKwh} kWh · {vehicle.supportedChargerType}
               </option>
             ))}
           </select>
 
           {selectedVehicle && (
-            <div className="vehicle-info-grid">
-              <div className="vehicle-info-item">
-                <BatteryCharging size={20} />
-                <span>סוללה שמורה</span>
-                <strong>{selectedVehicle.currentBattery}%</strong>
-              </div>
-              <div className="vehicle-info-item">
-                <Zap size={20} />
-                <span>קיבולת סוללה</span>
-                <strong>{selectedVehicle.batteryCapacityKwh} kWh</strong>
-              </div>
-              <div className="vehicle-info-item">
-                <Plug size={20} />
-                <span>סוג מחבר</span>
-                <strong>{selectedVehicle.supportedChargerType}</strong>
-              </div>
+            <div className="vehicle-selected-meta">
+              <span>קיבולת: {selectedVehicle.batteryCapacityKwh} kWh</span>
+              <span aria-hidden="true">·</span>
+              <span>מחבר: {selectedVehicle.supportedChargerType}</span>
             </div>
           )}
         </>
       )}
-
-      <button
-        type="button"
-        className="ev-btn ev-btn-secondary ev-btn-auto"
-        disabled={disabled}
-        onClick={() => navigate('/profile')}
-      >
-        <PlusCircle size={18} />
-        הוספה וניהול רכבים
-      </button>
     </section>
   );
 }

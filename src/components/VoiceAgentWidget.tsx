@@ -1167,8 +1167,8 @@ export default function VoiceAgentWidget() {
         </div>
       )}
 
-      {/* כפתורים צפים בתחתית המסך */}
-      <div className="ev-voice-launchers" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+      {/* כפתור צף לפתיחת העוזר החכם */}
+      <div className="ev-voice-launchers" style={{ display: 'flex', alignItems: 'center' }}>
         <button
           type="button"
           onClick={() => setIsOpen((prev) => !prev)}
@@ -1200,45 +1200,6 @@ export default function VoiceAgentWidget() {
             <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
           </svg>
           <span>{isOpen ? 'סגור עוזר' : 'עוזר חכם'}</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={handleToggleVoice}
-          disabled={isStreaming}
-          title="קיצור דרך להקלטת הודעה קולית לסוכן"
-          style={{
-            padding: '10px 15px',
-            borderRadius: '12px',
-            border: 'none',
-            background: isListening ? '#DC2626' : '#EA580C',
-            color: '#FFFFFF',
-            fontWeight: 700,
-            cursor: isStreaming ? 'not-allowed' : 'pointer',
-            boxShadow: isListening
-              ? '0 8px 22px rgba(220, 38, 38, 0.35)'
-              : '0 8px 22px rgba(234, 88, 12, 0.28)',
-            fontSize: '0.88rem',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '7px',
-          }}
-        >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-            <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-            <line x1="12" y1="19" x2="12" y2="22" />
-          </svg>
-          <span>{isListening ? 'מקליט... לחצי לעצירה' : 'הקלט לסוכן'}</span>
         </button>
       </div>
     </div>

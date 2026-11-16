@@ -105,9 +105,10 @@ export default function DriverSearchScreen() {
   const [batteryStatusText, setBatteryStatusText] = useState<string>(initialIndicator.statusText);
   const [batteryColor, setBatteryColor] = useState<string>(initialIndicator.color);
 
-  const [locationText, setLocationText] = useState<string>('תל אביב');
+  const [locationText, setLocationText] = useState<string>('');
   const [gpsCoords, setGpsCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [suggestions, setSuggestions] = useState<CleanSuggestion[]>([]);
+  const [hoveredSuggestionId, setHoveredSuggestionId] = useState<number | null>(null);
   const [loadingSuggestions, setLoadingSuggestions] = useState<boolean>(false);
   const [detectingLocation, setDetectingLocation] = useState<boolean>(false);
   const [searchingLocation, setSearchingLocation] = useState<boolean>(false);
@@ -118,7 +119,7 @@ export default function DriverSearchScreen() {
   const [errorMessage, setErrorMessage] = useState<string>('');
 
   // מונע פתיחה חוזרת של רשימת ההצעות מיד אחרי בחירה או זיהוי GPS
-  const skipNextAutocompleteRef = useRef<boolean>(true);
+  const skipNextAutocompleteRef = useRef<boolean>(false);
 
   const [selectedVehicle, setVehicle] = useState<Vehicle | null>(null);
   const isBusy = loading || searchingLocation;
@@ -140,6 +141,7 @@ export default function DriverSearchScreen() {
     const query = locationText.trim();
     if (query.length < 3 || gpsCoords !== null) {
       setSuggestions([]);
+      setHoveredSuggestionId(null);
       return;
     }
 
@@ -171,10 +173,12 @@ export default function DriverSearchScreen() {
           }
 
           setSuggestions(cleaned);
+          setHoveredSuggestionId(null);
         }
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') return;
         setSuggestions([]);
+        setHoveredSuggestionId(null);
       } finally {
         setLoadingSuggestions(false);
       }
@@ -191,6 +195,7 @@ export default function DriverSearchScreen() {
     setLocationText(item.label);
     setGpsCoords({ lat: item.lat, lng: item.lng });
     setSuggestions([]);
+    setHoveredSuggestionId(null);
     setErrorMessage('');
   };
 
@@ -283,6 +288,7 @@ export default function DriverSearchScreen() {
   function handleDetectLocation() {
     setErrorMessage('');
     setSuggestions([]);
+    setHoveredSuggestionId(null);
     if (!navigator.geolocation) {
       setErrorMessage('הדפדפן שלך אינו תומך בזיהוי מיקום.');
       return;
@@ -416,6 +422,7 @@ export default function DriverSearchScreen() {
 
     setErrorMessage('');
     setSuggestions([]);
+    setHoveredSuggestionId(null);
     const actualBattery = overrideBattery ?? batteryLevel;
     const safeTarget = targetBattery;
     dispatch(setSearchBattery({ currentBatteryPercent: actualBattery, targetBatteryPercent: safeTarget }));
@@ -454,6 +461,7 @@ export default function DriverSearchScreen() {
   async function handleShowAllStations() {
     setErrorMessage('');
     setSuggestions([]);
+    setHoveredSuggestionId(null);
     const safeTarget = Math.max(targetBattery, Math.min(batteryLevel + 10, 100));
     dispatch(setSearchBattery({ currentBatteryPercent: batteryLevel, targetBatteryPercent: safeTarget }));
     dispatch(setDriverLocation(gpsCoords));
@@ -511,7 +519,7 @@ export default function DriverSearchScreen() {
                 <input
                   type="text"
                   className="form-control"
-                  placeholder="לדוגמה: רוטשילד 50 פתח תקווה"
+                  placeholder="מיקום נוכחי או כתובת יעד..."
                   value={locationText}
                   onChange={(e) => {
                     setLocationText(e.target.value);
@@ -542,13 +550,14 @@ export default function DriverSearchScreen() {
 
               {suggestions.length > 0 && (
                 <ul
+                  onMouseLeave={() => setHoveredSuggestionId(null)}
                   style={{
                     position: 'absolute',
                     top: '100%',
                     left: 0,
                     right: 0,
                     zIndex: 20,
-                    background: 'var(--ev-surface)',
+                    background: 'var(--ev-surface-solid)',
                     border: '1px solid var(--ev-border)',
                     borderRadius: '10px',
                     listStyle: 'none',
@@ -559,22 +568,29 @@ export default function DriverSearchScreen() {
                     boxShadow: '0 10px 25px rgba(15, 23, 42, 0.1)',
                   }}
                 >
-                  {suggestions.map((item) => (
-                    <li
-                      key={item.id}
-                      onClick={() => handleSelectSuggestion(item)}
-                      style={{
-                        padding: '10px 14px',
-                        fontSize: '0.88rem',
-                        color: 'var(--ev-ink)',
-                        textAlign: 'right',
-                        cursor: 'pointer',
-                        borderBottom: '1px solid var(--ev-surface-subtle)',
-                      }}
-                    >
-                      {item.label}
-                    </li>
-                  ))}
+                  {suggestions.map((item) => {
+                    const isHovered = hoveredSuggestionId === item.id;
+                    return (
+                      <li
+                        key={item.id}
+                        onClick={() => handleSelectSuggestion(item)}
+                        onMouseEnter={() => setHoveredSuggestionId(item.id)}
+                        style={{
+                          padding: '10px 14px',
+                          fontSize: '0.88rem',
+                          color: isHovered ? 'var(--ev-brand-hover)' : 'var(--ev-ink)',
+                          background: isHovered ? 'var(--ev-brand-soft)' : 'transparent',
+                          fontWeight: isHovered ? 600 : 400,
+                          textAlign: 'right',
+                          cursor: 'pointer',
+                          borderBottom: '1px solid var(--ev-surface-subtle)',
+                          transition: 'background-color 0.15s ease, color 0.15s ease',
+                        }}
+                      >
+                        {item.label}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

@@ -1,6 +1,9 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { apiFetch } from '../api/apiClient';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
 import type { Station } from '../store/stations/stationsState';
+import { hasUserProfile } from '../store/user/userState';
+import { switchUserRole } from '../store/user/userThunks';
 import PageHeader from './ui/PageHeader';
 import StatCard from './ui/StatCard';
 
@@ -11,7 +14,7 @@ import {
   TriangleAlert,
   CalendarDays,
   Star,
-  Plus
+  Plus,
 } from 'lucide-react';
 
 interface UserClaim {
@@ -59,17 +62,53 @@ interface ChargeBooking {
 }
 
 interface NominatimAddress {
+  road?: string;
   house_number?: string;
+  city?: string;
+  town?: string;
+  village?: string;
+  municipality?: string;
 }
 
 interface NominatimResult {
+  place_id: number;
+  name?: string;
+  display_name: string;
   class?: string;
   lat: string;
   lon: string;
   address?: NominatimAddress;
 }
 
+interface CleanSuggestion {
+  id: number;
+  label: string;
+  lat: number;
+  lng: number;
+}
+
 type OwnerTab = 'stations' | 'bookings' | 'feedback';
+
+function formatCleanAddress(item: NominatimResult): string {
+  const addr = item.address;
+  const street = addr?.road
+    ? `${addr.road}${addr.house_number ? ` ${addr.house_number}` : ''}`
+    : '';
+  const city = addr?.city || addr?.town || addr?.village || addr?.municipality || '';
+  const placeName =
+    item.name && item.name !== addr?.road && item.name !== city ? item.name : '';
+
+  const parts = [placeName, street, city].filter(Boolean);
+  if (parts.length > 0) {
+    return parts.join(', ');
+  }
+
+  return item.display_name
+    .split(',')
+    .slice(0, 2)
+    .map((p) => p.trim())
+    .join(', ');
+}
 
 function normalizeAddressQuery(raw: string): string {
   return raw
@@ -131,8 +170,12 @@ function getBookingStatusStyle(status: string): { label: string; bg: string; col
 }
 
 export default function StationOwnerScreen() {
+  const dispatch = useAppDispatch();
+  const { token } = useAppSelector((state) => state.user);
+
   const [dashboard, setDashboard] = useState<OwnerDashboard | null>(null);
   const [bookings, setBookings] = useState<ChargeBooking[]>([]);
+  const [needsOwnerSetup, setNeedsOwnerSetup] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -143,10 +186,18 @@ export default function StationOwnerScreen() {
   // שדות לטופס הוספת עמדה
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
-  const [chargerType, setChargerType] = useState<'CCS' | 'Type2'>('CCS');
+  const [addressCoords, setAddressCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [suggestions, setSuggestions] = useState<CleanSuggestion[]>([]);
+  const [hoveredSuggestionId, setHoveredSuggestionId] = useState<number | null>(null);
+  const [loadingSuggestions, setLoadingSuggestions] = useState<boolean>(false);
+  const [detectingLocation, setDetectingLocation] = useState<boolean>(false);
+  const [chargerType, setChargerType] = useState<'CCS' | 'Type2'>('Type2');
   const [maxKw, setMaxKw] = useState('50');
   const [pricePerKwh, setPricePerKwh] = useState('1.8');
   const [saving, setSaving] = useState(false);
+
+  // מונע פתיחה חוזרת של הצעות מיד אחרי בחירה או זיהוי GPS
+  const skipNextAutocompleteRef = useRef<boolean>(false);
 
   // שדות לעריכת עמדה קיימת
   const [editingStationId, setEditingStationId] = useState<number | null>(null);
@@ -154,7 +205,7 @@ export default function StationOwnerScreen() {
   const [editAddress, setEditAddress] = useState('');
   const [editPrice, setEditPrice] = useState('');
   const [editMaxKw, setEditMaxKw] = useState('');
-  const [editChargerType, setEditChargerType] = useState<'CCS' | 'Type2'>('CCS');
+  const [editChargerType, setEditChargerType] = useState<'CCS' | 'Type2'>('Type2');
   const [savingEdit, setSavingEdit] = useState(false);
 
   const loadOwnerData = async () => {
@@ -166,9 +217,14 @@ export default function StationOwnerScreen() {
       const ownerIdClaim = claims.find((c) => c.type === 'ownerId')?.value;
 
       if (!ownerIdClaim) {
-        setError('המשתמש הנוכחי אינו רשום כבעל תחנה. היכנסי ממסך הכניסה בתפקיד "בעל עמדת טעינה".');
+        setNeedsOwnerSetup(true);
+        setDashboard(null);
+        setBookings([]);
+        setShowAddForm(true);
         return;
       }
+
+      setNeedsOwnerSetup(false);
 
       const [dashboardData, bookingsData] = await Promise.all([
         apiFetch<OwnerDashboard>(`/Owner/${ownerIdClaim}/dashboard`),
@@ -188,18 +244,152 @@ export default function StationOwnerScreen() {
     void loadOwnerData();
   }, []);
 
+  useEffect(() => {
+    if (!showAddForm) {
+      setSuggestions([]);
+      setHoveredSuggestionId(null);
+      return;
+    }
+
+    if (skipNextAutocompleteRef.current) {
+      skipNextAutocompleteRef.current = false;
+      return;
+    }
+
+    const query = address.trim();
+    if (query.length < 3 || addressCoords !== null) {
+      setSuggestions([]);
+      setHoveredSuggestionId(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timerId = window.setTimeout(async () => {
+      setLoadingSuggestions(true);
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=il&accept-language=he&limit=8&q=${encodeURIComponent(query)}`,
+          { signal: controller.signal }
+        );
+        if (res.ok) {
+          const data = (await res.json()) as NominatimResult[];
+          const seen = new Set<string>();
+          const cleaned: CleanSuggestion[] = [];
+
+          for (const item of data) {
+            const label = formatCleanAddress(item);
+            if (!seen.has(label)) {
+              seen.add(label);
+              cleaned.push({
+                id: item.place_id,
+                label,
+                lat: Number(item.lat),
+                lng: Number(item.lon),
+              });
+            }
+            if (cleaned.length >= 5) break;
+          }
+
+          setSuggestions(cleaned);
+          setHoveredSuggestionId(null);
+        }
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return;
+        setSuggestions([]);
+        setHoveredSuggestionId(null);
+      } finally {
+        setLoadingSuggestions(false);
+      }
+    }, 400);
+
+    return () => {
+      window.clearTimeout(timerId);
+      controller.abort();
+    };
+  }, [showAddForm, address, addressCoords]);
+
+  const handleSelectSuggestion = (item: CleanSuggestion) => {
+    skipNextAutocompleteRef.current = true;
+    setAddress(item.label);
+    setAddressCoords({ lat: item.lat, lng: item.lng });
+    setSuggestions([]);
+    setHoveredSuggestionId(null);
+    setError(null);
+  };
+
+  const handleDetectLocation = () => {
+    setError(null);
+    setSuggestions([]);
+    setHoveredSuggestionId(null);
+
+    if (!navigator.geolocation) {
+      setError('הדפדפן שלך אינו תומך בזיהוי מיקום.');
+      return;
+    }
+
+    setDetectingLocation(true);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        skipNextAutocompleteRef.current = true;
+        setAddressCoords({ lat, lng });
+
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=he`
+          );
+          if (res.ok) {
+            const data = (await res.json()) as {
+              display_name?: string;
+              address?: NominatimAddress;
+            };
+            const cityName =
+              data.address?.city ||
+              data.address?.town ||
+              data.address?.village ||
+              data.address?.municipality ||
+              '';
+            const road = data.address?.road
+              ? `${data.address.road}${data.address.house_number ? ` ${data.address.house_number}` : ''}`
+              : '';
+            const shortAddress = [road, cityName].filter(Boolean).join(', ');
+            setAddress(shortAddress || data.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+          } else {
+            setAddress(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+          }
+        } catch {
+          setAddress(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+        } finally {
+          setDetectingLocation(false);
+        }
+      },
+      () => {
+        setError('לא הצלחנו לזהות את המיקום. ודאי שאישרת גישה למיקום בדפדפן, או הקלידי כתובת.');
+        setDetectingLocation(false);
+      }
+    );
+  };
+
   const handleAddStation = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccessMessage(null);
+    setSuggestions([]);
+    setHoveredSuggestionId(null);
+
     try {
       setSaving(true);
 
-      const coords = await resolveAddressCoords(address);
+      const coords = addressCoords ?? (await resolveAddressCoords(address));
       if (!coords) {
         throw new Error(
           `לא הצלחנו לאתר את הכתובת "${address}". נסי לרשום רחוב, מספר בית ועיר (למשל: התשעים ושלוש 5, פתח תקווה).`
         );
+      }
+
+      if (needsOwnerSetup || !hasUserProfile(token, 'Owner')) {
+        await dispatch(switchUserRole('Owner')).unwrap();
       }
 
       await apiFetch('/ChargingStations', {
@@ -218,6 +408,9 @@ export default function StationOwnerScreen() {
 
       setName('');
       setAddress('');
+      setAddressCoords(null);
+      setChargerType('Type2');
+      setNeedsOwnerSetup(false);
       setShowAddForm(false);
       setActiveTab('stations');
       setSuccessMessage('העמדה החדשה נוספה בהצלחה ומוצגת לנהגים במפה.');
@@ -248,7 +441,7 @@ export default function StationOwnerScreen() {
     setEditAddress(station.address);
     setEditPrice(String(station.pricePerKwh));
     setEditMaxKw(String(station.maxKw));
-    setEditChargerType(station.chargerType === 'Type2' ? 'Type2' : 'CCS');
+    setEditChargerType(station.chargerType === 'CCS' ? 'CCS' : 'Type2');
   };
 
   const handleSaveEdit = async (station: Station) => {
@@ -320,35 +513,34 @@ export default function StationOwnerScreen() {
     : 0;
 
   return (
-  <div className="dash-page" dir="rtl">
+    <div className="dash-page" dir="rtl">
+      <PageHeader
+        title="לוח ניהול תחנות"
+        description="ניהול התחנות, ההזמנות, הביקורות והזמינות במקום אחד"
+        icon={LayoutDashboard}
+        actions={
+          (dashboard || needsOwnerSetup) && (
+            <button
+              type="button"
+              className={`ev-btn ev-btn-auto ${
+                showAddForm
+                  ? 'ev-btn-secondary'
+                  : 'ev-btn-accent'
+              }`}
+              onClick={() => {
+                setShowAddForm((prev) => !prev);
+                setError(null);
+              }}
+            >
+              <Plus size={19} />
 
-    <PageHeader
-      title="לוח ניהול תחנות"
-      description="ניהול התחנות, ההזמנות, הביקורות והזמינות במקום אחד"
-      icon={LayoutDashboard}
-      actions={
-        dashboard && (
-          <button
-            type="button"
-            className={`ev-btn ev-btn-auto ${
-              showAddForm
-                ? 'ev-btn-secondary'
-                : 'ev-btn-accent'
-            }`}
-            onClick={() => {
-              setShowAddForm(prev => !prev);
-              setError(null);
-            }}
-          >
-            <Plus size={19} />
-
-            {showAddForm
-              ? 'סגור טופס הוספה'
-              : 'הוספת עמדה חדשה'}
-          </button>
-        )
-      }
-    />
+              {showAddForm
+                ? 'סגור טופס הוספה'
+                : 'הוספת עמדה חדשה'}
+            </button>
+          )
+        }
+      />
       {error && (
         <div className="ev-alert-error" style={{ marginBottom: 0 }}>
           {error}
@@ -371,144 +563,238 @@ export default function StationOwnerScreen() {
         </div>
       )}
 
-      {dashboard && (
-        <>
-          {/* טופס הוספת עמדה — נפתח רק בלחיצה */}
-          {showAddForm && (
-            <form
-              onSubmit={handleAddStation}
-              className="ev-card"
-              style={{
-                border: '1.5px solid var(--ev-brand-border)',
-              }}
+      {needsOwnerSetup && !dashboard && (
+        <div className="ev-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: '1.08rem', color: 'var(--ev-ink)' }}>
+              רוצה להשכיר עמדת טעינה?
+            </h2>
+            <p style={{ margin: '4px 0 0 0', fontSize: '0.88rem', color: 'var(--ev-ink-muted)' }}>
+              פרופיל בעל התחנה ייווצר רק לאחר הוספת העמדה הראשונה שלך — כך המערכת נשארת נקייה מעמודים ריקים.
+            </p>
+          </div>
+          {!showAddForm && (
+            <button
+              type="button"
+              className="ev-btn ev-btn-accent ev-btn-auto"
+              onClick={() => setShowAddForm(true)}
             >
-              <div className="screen-header" style={{ marginBottom: '16px' }}>
-                <div>
-                  <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>הוספת עמדת טעינה חדשה</div>
-                  <p className="ev-subtitle">הכתובת מאותרת אוטומטית לפי רחוב, מספר בית ועיר</p>
-                </div>
-              </div>
+              <Plus size={18} />
+              הוסף את העמדה הראשונה שלך
+            </button>
+          )}
+        </div>
+      )}
 
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))',
-                  gap: '12px',
-                }}
+      {/* טופס הוספת עמדה — נפתח בלחיצה או למשתמש בהגשת עמדה ראשונה */}
+      {(dashboard || needsOwnerSetup) && showAddForm && (
+        <form
+          onSubmit={handleAddStation}
+          className="ev-card"
+          style={{
+            border: '1.5px solid var(--ev-brand-border)',
+          }}
+        >
+          <div className="screen-header" style={{ marginBottom: '16px' }}>
+            <div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>הוספת עמדת טעינה חדשה</div>
+              <p className="ev-subtitle">הכתובת מאותרת אוטומטית מהצעות החיפוש או ממיקום נוכחי</p>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))',
+              gap: '12px',
+            }}
+          >
+            <div className="form-group">
+              <label>שם העמדה</label>
+              <input
+                type="text"
+                className="form-control"
+                required
+                placeholder="עמדת תל אביב מרכז"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label>סוג שקע</label>
+              <select
+                className="form-control"
+                value={chargerType}
+                onChange={(e) => setChargerType(e.target.value as 'CCS' | 'Type2')}
               >
-                <div className="form-group">
-                  <label>שם העמדה</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    required
-                    placeholder="עמדת תל אביב מרכז"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>כתובת מלאה</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    required
-                    placeholder="התשעים ושלוש 5, פתח תקווה"
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>סוג שקע</label>
-                  <select
-                    className="form-control"
-                    value={chargerType}
-                    onChange={(e) => setChargerType(e.target.value as 'CCS' | 'Type2')}
-                  >
-                    <option value="CCS">CCS (טעינה מהירה)</option>
-                    <option value="Type2">Type2</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>הספק (kW)</label>
-                  <input
-                    type="number"
-                    className="form-control tabular-nums"
-                    required
-                    min={1}
-                    max={1000}
-                    value={maxKw}
-                    onChange={(e) => setMaxKw(e.target.value)}
-                  />
-                </div>
-                <div className="form-group">
-                  <label>מחיר לקוט&quot;ש (₪)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    className="form-control tabular-nums"
-                    required
-                    min={0.1}
-                    value={pricePerKwh}
-                    onChange={(e) => setPricePerKwh(e.target.value)}
-                  />
-                </div>
-              </div>
+                <option value="Type2">Type2</option>
+                <option value="CCS">CCS (טעינה מהירה)</option>
+              </select>
+            </div>
+            <div className="form-group">
+              <label>הספק (kW)</label>
+              <input
+                type="number"
+                className="form-control tabular-nums"
+                required
+                min={1}
+                max={1000}
+                value={maxKw}
+                onChange={(e) => setMaxKw(e.target.value)}
+              />
+            </div>
+            <div className="form-group">
+              <label>מחיר לקוט&quot;ש (₪)</label>
+              <input
+                type="number"
+                step="0.1"
+                className="form-control tabular-nums"
+                required
+                min={0.1}
+                value={pricePerKwh}
+                onChange={(e) => setPricePerKwh(e.target.value)}
+              />
+            </div>
 
-              <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-                <button type="submit" className="ev-btn ev-btn-auto" disabled={saving}>
-                  {saving ? 'מאתר כתובת ושומר...' : 'שמור עמדה חדשה'}
-                </button>
+            <div className="form-group" style={{ gridColumn: '1 / -1', position: 'relative' }}>
+              <label>כתובת מלאה</label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  className="form-control"
+                  required
+                  placeholder="הקלד כתובת מלאה או לחץ זהה מיקום..."
+                  value={address}
+                  onChange={(e) => {
+                    setAddress(e.target.value);
+                    setAddressCoords(null);
+                  }}
+                />
                 <button
                   type="button"
                   className="ev-btn ev-btn-secondary ev-btn-auto"
-                  onClick={() => setShowAddForm(false)}
+                  disabled={detectingLocation}
+                  onClick={handleDetectLocation}
                 >
-                  ביטול
+                  {detectingLocation ? 'מאתר...' : 'זהה מיקום'}
                 </button>
               </div>
-            </form>
-          )}
 
+              {loadingSuggestions && (
+                <div
+                  style={{
+                    fontSize: '0.78rem',
+                    color: 'var(--ev-ink-soft)',
+                    marginTop: '6px',
+                  }}
+                >
+                  מחפש הצעות כתובות...
+                </div>
+              )}
+
+              {suggestions.length > 0 && (
+                <ul
+                  onMouseLeave={() => setHoveredSuggestionId(null)}
+                  style={{
+                    position: 'absolute',
+                    top: '100%',
+                    left: 0,
+                    right: 0,
+                    zIndex: 20,
+                    background: 'var(--ev-surface-solid)',
+                    border: '1px solid var(--ev-border)',
+                    borderRadius: '10px',
+                    listStyle: 'none',
+                    margin: '6px 0 0 0',
+                    padding: 0,
+                    maxHeight: '220px',
+                    overflowY: 'auto',
+                    boxShadow: '0 10px 25px rgba(15, 23, 42, 0.1)',
+                  }}
+                >
+                  {suggestions.map((item) => {
+                    const isHovered = hoveredSuggestionId === item.id;
+                    return (
+                      <li
+                        key={item.id}
+                        onClick={() => handleSelectSuggestion(item)}
+                        onMouseEnter={() => setHoveredSuggestionId(item.id)}
+                        style={{
+                          padding: '10px 14px',
+                          fontSize: '0.88rem',
+                          color: isHovered ? 'var(--ev-brand-hover)' : 'var(--ev-ink)',
+                          background: isHovered ? 'var(--ev-brand-soft)' : 'transparent',
+                          fontWeight: isHovered ? 600 : 400,
+                          textAlign: 'right',
+                          cursor: 'pointer',
+                          borderBottom: '1px solid var(--ev-surface-subtle)',
+                          transition: 'background-color 0.15s ease, color 0.15s ease',
+                        }}
+                      >
+                        {item.label}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <button type="submit" className="ev-btn ev-btn-auto" disabled={saving}>
+              {saving ? 'מאתר כתובת ושומר...' : 'שמור עמדה חדשה'}
+            </button>
+            <button
+              type="button"
+              className="ev-btn ev-btn-secondary ev-btn-auto"
+              onClick={() => setShowAddForm(false)}
+            >
+              ביטול
+            </button>
+          </div>
+        </form>
+      )}
+
+      {dashboard && (
+        <>
           {/* שורת מדדים קומפקטית */}
           <div className="dash-stats">
+            <StatCard
+              title="סה״כ עמדות"
+              value={dashboard.totalStationsCount}
+              icon={Zap}
+              tone="orange"
+            />
 
-  <StatCard
-    title="סה״כ עמדות"
-    value={dashboard.totalStationsCount}
-    icon={Zap}
-    tone="orange"
-  />
+            <StatCard
+              title="עמדות פעילות"
+              value={dashboard.activeStationsCount}
+              icon={CircleCheck}
+              tone="green"
+            />
 
-  <StatCard
-    title="עמדות פעילות"
-    value={dashboard.activeStationsCount}
-    icon={CircleCheck}
-    tone="green"
-  />
+            <StatCard
+              title="עמדות תקולות"
+              value={dashboard.faultyStationsCount}
+              icon={TriangleAlert}
+              tone="red"
+            />
 
-  <StatCard
-    title="עמדות תקולות"
-    value={dashboard.faultyStationsCount}
-    icon={TriangleAlert}
-    tone="red"
-  />
+            <StatCard
+              title="סה״כ הזמנות"
+              value={dashboard.totalBookings}
+              icon={CalendarDays}
+              tone="blue"
+            />
 
-  <StatCard
-    title="סה״כ הזמנות"
-    value={dashboard.totalBookings}
-    icon={CalendarDays}
-    tone="blue"
-  />
+            <StatCard
+              title="דירוג ממוצע"
+              value={dashboard.averageRating?.toFixed(1) ?? '—'}
+              icon={Star}
+              tone="orange"
+            />
+          </div>
 
-  <StatCard
-    title="דירוג ממוצע"
-    value={dashboard.averageRating?.toFixed(1) ?? '—'}
-    icon={Star}
-    tone="orange"
-  />
-
-</div>
           {/* סרגל טאבים */}
           <div
             style={{
@@ -801,8 +1087,8 @@ export default function StationOwnerScreen() {
                               value={editChargerType}
                               onChange={(e) => setEditChargerType(e.target.value as 'CCS' | 'Type2')}
                             >
-                              <option value="CCS">CCS</option>
                               <option value="Type2">Type2</option>
+                              <option value="CCS">CCS</option>
                             </select>
                           </div>
                           <button

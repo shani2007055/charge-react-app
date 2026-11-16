@@ -1,4 +1,3 @@
-
 import { createAsyncThunk } from '@reduxjs/toolkit';
 import { apiFetch } from '../../api/apiClient';
 import { isAdminToken, type UserRole } from './userState';
@@ -87,16 +86,12 @@ export const loginUser = createAsyncThunk<
 
       if (
         !isAdminToken(authData.token) &&
-        !authData.hasRequestedProfile
+        !authData.hasRequestedProfile &&
+        role === 'Driver'
       ) {
 
-        const endpoint =
-          role === 'Owner'
-            ? '/users/become-owner'
-            : '/users/become-driver';
-
         authData = await apiFetch<AuthResponse>(
-          endpoint,
+          '/users/become-driver',
           { method: 'POST' }
         );
 

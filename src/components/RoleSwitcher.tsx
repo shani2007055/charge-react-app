@@ -1,4 +1,3 @@
-
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -12,6 +11,10 @@ import {
   useAppDispatch,
   useAppSelector
 } from '../store/hooks';
+
+import {
+  setActiveRole
+} from '../store/user/userSlice';
 
 import {
   switchUserRole
@@ -90,6 +93,11 @@ export default function RoleSwitcher() {
     if (hasUserProfile(token, newRole)) {
 
       void performSwitch(newRole);
+
+    } else if (newRole === 'Owner') {
+
+      dispatch(setActiveRole('Owner'));
+      navigate('/owner', { replace: true });
 
     } else {
 

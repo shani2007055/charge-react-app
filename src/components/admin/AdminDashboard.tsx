@@ -327,9 +327,14 @@ export default function AdminDashboard() {
   const currentPage =
     navigation.find((item) => item.id === page) ?? navigation[0];
 
+  const activeOwners = useMemo(
+    () => data.owners.filter((o) => o.stationsCount > 0),
+    [data.owners]
+  );
+
   const table = useMemo(
-    () => getTable(page, data),
-    [page, data]
+    () => getTable(page, { ...data, owners: activeOwners }),
+    [page, data, activeOwners]
   );
 
   const filteredRows = useMemo(() => {
@@ -378,12 +383,12 @@ export default function AdminDashboard() {
     for (const s of data.stations) {
       if (!s.isActive) {
         counts.inactive += 1;
-        continue;
-      }
-      const st = s.currentStatus?.toLowerCase();
-      if (st === 'faulty') {
+      } else if (s.currentStatus?.toLowerCase() === 'faulty') {
         counts.faulty += 1;
-      } else if (st === 'occupied' || st === 'reserved' || st === 'busy') {
+      } else if (
+        s.currentStatus?.toLowerCase() === 'busy' ||
+        s.currentStatus?.toLowerCase() === 'occupied'
+      ) {
         counts.busy += 1;
       } else {
         counts.available += 1;
@@ -638,7 +643,7 @@ export default function AdminDashboard() {
               />
               <StatCard
                 title="בעלי תחנות"
-                value={metricValue('owners', data.owners.length)}
+                value={metricValue('owners', activeOwners.length)}
                 icon={Building2}
                 tone="blue"
               />

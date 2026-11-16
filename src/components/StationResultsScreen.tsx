@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MapPin } from 'lucide-react';
+import { MapPin, Plug, Zap, Clock, Info } from 'lucide-react';
 import { apiFetch } from '../api/apiClient';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { setSelectedVehicle } from '../store/stations/stationsSlice';
 import type { Station } from '../store/stations/stationsState';
 import { fetchStations } from '../store/stations/stationsThunks';
 import type { Vehicle } from '../types/Vehicle';
+import { fetchNearbyPublicStations, type PublicStation } from '../utils/publicStations';
 import StationsMap, { type MapStationItem } from './StationsMap';
 import PageHeader from './ui/PageHeader';
 import StationMetrics from './ui/StationMetrics';
@@ -17,9 +18,12 @@ interface BookingStatusOnly {
   status: string;
 }
 
-type QuickFilter = 'all' | 'available' | 'fast' | 'cheap';
+type QuickFilter = 'all' | 'available' | 'fast';
+type SourceFilter = 'all' | 'private' | 'public';
+type SortBy = 'recommended' | 'cheapest' | 'closest' | 'fastest';
 
 const ACTIVE_STATUSES = ['Held', 'Confirmed', 'Charging'];
+const DEFAULT_PUBLIC_CENTER = { lat: 32.0853, lng: 34.7818 };
 
 function toLocalIsoString(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -51,6 +55,48 @@ function estimateReservationWindow(distanceKm: number | null): {
   return { travelMinutes, bufferMinutes, totalMinutes };
 }
 
+function isValidCoordPair(lat: number, lng: number): boolean {
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    !(lat === 0 && lng === 0) &&
+    Math.abs(lat) <= 90 &&
+    Math.abs(lng) <= 180
+  );
+}
+
+function publicStationToMapItem(
+  pub: PublicStation,
+  showDistance: boolean
+): MapStationItem {
+  return {
+    station: {
+      id: pub.id,
+      ownerId: 0,
+      name: pub.name,
+      address: pub.address,
+      latitude: pub.latitude,
+      longitude: pub.longitude,
+      chargerType: pub.chargerLabel,
+      maxKw: pub.maxKw ?? 0,
+      pricePerKwh: 0,
+      isActive: true,
+      averageRating: null,
+      reviewsCount: 0,
+      currentStatus: null,
+    },
+    distanceKm: showDistance ? pub.distanceKm : undefined,
+    isPublic: true,
+    publicMeta: {
+      operator: pub.operator,
+      chargerLabel: pub.chargerLabel,
+      maxKw: pub.maxKw,
+      feeLabel: pub.feeLabel,
+      openingHours: pub.openingHours,
+    },
+  };
+}
+
 export default function StationResultsScreen() {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
@@ -71,7 +117,14 @@ export default function StationResultsScreen() {
   const [reservingId, setReservingId] = useState<number | null>(null);
   const [showMap, setShowMap] = useState<boolean>(true);
   const [quickFilter, setQuickFilter] = useState<QuickFilter>('all');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+  const [sortBy, setSortBy] = useState<SortBy>('recommended');
   const [selectedStationId, setSelectedStationId] = useState<number | null>(null);
+
+  const [publicStations, setPublicStations] = useState<PublicStation[]>([]);
+  const [publicLoading, setPublicLoading] = useState<boolean>(false);
+  const [publicError, setPublicError] = useState<string | null>(null);
+  const [publicRetryCounter, setPublicRetryCounter] = useState<number>(0);
 
   useEffect(() => {
     if (!hasSearched) {
@@ -88,6 +141,86 @@ export default function StationResultsScreen() {
     }
     void checkActiveBooking();
   }, [dispatch, hasSearched]);
+
+  const publicSearchCenter = useMemo(() => {
+    if (
+      driverLocation &&
+      isValidCoordPair(driverLocation.lat, driverLocation.lng)
+    ) {
+      return driverLocation;
+    }
+
+    const firstRec = recommendations.find((r) =>
+      isValidCoordPair(r.station.latitude, r.station.longitude)
+    );
+    if (firstRec) {
+      return {
+        lat: firstRec.station.latitude,
+        lng: firstRec.station.longitude,
+      };
+    }
+
+    const firstItem = items.find((s) =>
+      isValidCoordPair(s.latitude, s.longitude)
+    );
+    if (firstItem) {
+      return {
+        lat: firstItem.latitude,
+        lng: firstItem.longitude,
+      };
+    }
+
+    return DEFAULT_PUBLIC_CENTER;
+  }, [driverLocation, recommendations, items]);
+
+  useEffect(() => {
+    if (loading) return;
+
+    const controller = new AbortController();
+    let cancelled = false;
+
+    async function loadPublic() {
+      setPublicLoading(true);
+      setPublicError(null);
+      try {
+        const list = await fetchNearbyPublicStations(
+          publicSearchCenter.lat,
+          publicSearchCenter.lng,
+          15000,
+          controller.signal
+        );
+        if (!cancelled) {
+          setPublicStations(list);
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        if (!cancelled) {
+          setPublicStations([]);
+          setPublicError(
+            err instanceof Error
+              ? err.message
+              : 'לא ניתן לטעון עמדות ציבוריות כרגע'
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setPublicLoading(false);
+        }
+      }
+    }
+
+    void loadPublic();
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [
+    loading,
+    publicSearchCenter.lat,
+    publicSearchCenter.lng,
+    publicRetryCounter,
+  ]);
 
   const handleReserveStation = useCallback(
     async (station: Station, explicitDistanceKm?: number) => {
@@ -204,52 +337,122 @@ export default function StationResultsScreen() {
       if (quickFilter === 'fast') {
         return station.maxKw >= 50;
       }
-      if (quickFilter === 'cheap') {
-        return station.pricePerKwh <= 1.6;
-      }
       return true;
     },
     [quickFilter]
   );
 
-  const filteredRecommendations = useMemo(
-    () => recommendations.filter((rec) => matchesQuickFilter(rec.station)),
-    [recommendations, matchesQuickFilter]
-  );
+  const showPrivate = sourceFilter === 'all' || sourceFilter === 'private';
+  const showPublic = sourceFilter === 'all' || sourceFilter === 'public';
 
-  const filteredItems = useMemo(
-    () => items.filter((station) => matchesQuickFilter(station)),
-    [items, matchesQuickFilter]
-  );
+  const filteredRecommendations = useMemo(() => {
+    if (!showPrivate) return [];
+    const list = recommendations.filter((rec) => matchesQuickFilter(rec.station));
+
+    if (sortBy === 'recommended') {
+      return list;
+    }
+
+    return [...list].sort((a, b) => {
+      if (sortBy === 'cheapest') {
+        return a.station.pricePerKwh - b.station.pricePerKwh;
+      }
+      if (sortBy === 'closest') {
+        return a.distanceKm - b.distanceKm;
+      }
+      return b.station.maxKw - a.station.maxKw;
+    });
+  }, [showPrivate, recommendations, matchesQuickFilter, sortBy]);
+
+  const filteredItems = useMemo(() => {
+    if (!showPrivate) return [];
+    const list = items.filter((station) => matchesQuickFilter(station));
+
+    if (sortBy === 'recommended') {
+      return list;
+    }
+
+    return [...list].sort((a, b) => {
+      if (sortBy === 'cheapest') {
+        return a.pricePerKwh - b.pricePerKwh;
+      }
+      if (sortBy === 'fastest') {
+        return b.maxKw - a.maxKw;
+      }
+      if (!driverLocation) {
+        return 0;
+      }
+      const distA = calculateDistanceKm(
+        driverLocation.lat,
+        driverLocation.lng,
+        a.latitude,
+        a.longitude
+      );
+      const distB = calculateDistanceKm(
+        driverLocation.lat,
+        driverLocation.lng,
+        b.latitude,
+        b.longitude
+      );
+      return distA - distB;
+    });
+  }, [showPrivate, items, matchesQuickFilter, sortBy, driverLocation]);
+
+  const filteredPublicStations = useMemo(() => {
+    if (!showPublic) return [];
+    const list = publicStations.filter((pub) => {
+      if (quickFilter === 'fast') {
+        return (pub.maxKw ?? 0) >= 50;
+      }
+      return true;
+    });
+
+    if (sortBy === 'fastest') {
+      return [...list].sort((a, b) => (b.maxKw ?? 0) - (a.maxKw ?? 0));
+    }
+
+    return [...list].sort((a, b) => a.distanceKm - b.distanceKm);
+  }, [showPublic, publicStations, quickFilter, sortBy]);
 
   const mapStations = useMemo<MapStationItem[]>(() => {
-    if (hasSearched) {
-      return filteredRecommendations.map((rec) => ({
-        station: rec.station,
-        distanceKm: rec.distanceKm,
-        matchPercentage: rec.matchPercentage,
-        etaMinutes: estimateReservationWindow(rec.distanceKm).totalMinutes,
-      }));
-    }
-    return filteredItems.map((station) => {
-      const distanceKm = driverLocation
-        ? calculateDistanceKm(
-            driverLocation.lat,
-            driverLocation.lng,
-            station.latitude,
-            station.longitude
-          )
-        : undefined;
-      return {
-        station,
-        distanceKm,
-        etaMinutes:
-          distanceKm !== undefined
-            ? estimateReservationWindow(distanceKm).totalMinutes
-            : undefined,
-      };
-    });
-  }, [hasSearched, filteredRecommendations, filteredItems, driverLocation]);
+    const privateMapItems: MapStationItem[] = hasSearched
+      ? filteredRecommendations.map((rec) => ({
+          station: rec.station,
+          distanceKm: rec.distanceKm,
+          matchPercentage: rec.matchPercentage,
+          etaMinutes: estimateReservationWindow(rec.distanceKm).totalMinutes,
+        }))
+      : filteredItems.map((station) => {
+          const distanceKm = driverLocation
+            ? calculateDistanceKm(
+                driverLocation.lat,
+                driverLocation.lng,
+                station.latitude,
+                station.longitude
+              )
+            : undefined;
+          return {
+            station,
+            distanceKm,
+            etaMinutes:
+              distanceKm !== undefined
+                ? estimateReservationWindow(distanceKm).totalMinutes
+                : undefined,
+          };
+        });
+
+    const publicMapItems: MapStationItem[] = filteredPublicStations.map((pub) =>
+      publicStationToMapItem(pub, driverLocation !== null)
+    );
+
+    return [...privateMapItems, ...publicMapItems];
+  }, [
+    hasSearched,
+    filteredRecommendations,
+    filteredItems,
+    filteredPublicStations,
+    driverLocation,
+  ]);
 
   const handleFocusOnMap = (stationId: number) => {
     setShowMap(true);
@@ -280,8 +483,18 @@ export default function StationResultsScreen() {
     );
   }
 
-  const displayedCount = hasSearched ? filteredRecommendations.length : filteredItems.length;
+  const privateCount = hasSearched ? filteredRecommendations.length : filteredItems.length;
+  const publicCount = filteredPublicStations.length;
   const canRenderMap = showMap && (mapStations.length > 0 || driverLocation !== null);
+
+  const countSummary =
+    sourceFilter === 'public'
+      ? `מציג ${publicCount} עמדות ציבוריות בסביבה`
+      : sourceFilter === 'private'
+        ? `מציג ${privateCount} עמדות באתר`
+        : publicCount > 0
+          ? `מציג ${privateCount} עמדות באתר + ${publicCount} עמדות ציבוריות`
+          : `מציג ${privateCount} עמדות באתר`;
 
   return (
     <div className="dash-page" dir="rtl">
@@ -289,8 +502,8 @@ export default function StationResultsScreen() {
         title="עמדות טעינה"
         description={
           hasSearched
-            ? 'עמדות טעינה המותאמות לנתוני החיפוש שלך'
-            : 'גלו את עמדות הטעינה הזמינות במערכת'
+            ? 'עמדות טעינה המותאמות לנתוני החיפוש שלך יחד עם עמדות ציבוריות בסביבה'
+            : 'גלו את עמדות הטעינה הזמינות במערכת ועמדות ציבוריות באזור'
         }
         icon={MapPin}
       />
@@ -318,22 +531,43 @@ export default function StationResultsScreen() {
 
           <div>
             <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--ev-ink)' }}>
-              {hasSearched ? 'המלצות מותאמות אישית' : 'כל עמדות הטעינה במערכת'}
+              {hasSearched ? 'המלצות מותאמות אישית' : 'כל עמדות הטעינה'}
             </div>
             <div className="tabular-nums" style={{ fontSize: '0.78rem', color: 'var(--ev-ink-soft)' }}>
-              מציג {displayedCount} עמדות
+              {countSummary}
+              {publicLoading && ' · מאתר עמדות ציבוריות...'}
             </div>
           </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          {/* סינון מקור: הכול / עמדות האתר / ציבוריות */}
           <div className="auth-toggle" style={{ marginBottom: 0 }}>
             {(
               [
                 { id: 'all', label: 'הכול' },
+                { id: 'private', label: 'עמדות האתר' },
+                { id: 'public', label: 'ציבוריות' },
+              ] as const
+            ).map((src) => (
+              <button
+                key={src.id}
+                type="button"
+                className={`auth-toggle-btn ${sourceFilter === src.id ? 'active' : ''}`}
+                style={{ padding: '6px 11px', fontSize: '0.8rem' }}
+                onClick={() => setSourceFilter(src.id)}
+              >
+                {src.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="auth-toggle" style={{ marginBottom: 0 }}>
+            {(
+              [
+                { id: 'all', label: 'כל המצבים' },
                 { id: 'available', label: 'פנויות' },
                 { id: 'fast', label: 'מהירות 50kW+' },
-                { id: 'cheap', label: 'עד ₪1.6' },
               ] as const
             ).map((tab) => (
               <button
@@ -348,12 +582,42 @@ export default function StationResultsScreen() {
             ))}
           </div>
 
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <label
+              htmlFor="results-sort-by"
+              style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--ev-ink-muted)', margin: 0 }}
+            >
+              מיון לפי:
+            </label>
+            <select
+              id="results-sort-by"
+              className="form-control"
+              style={{
+                width: 'auto',
+                minWidth: '140px',
+                padding: '6px 10px',
+                fontSize: '0.8rem',
+              }}
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortBy)}
+            >
+              <option value="recommended">
+                {hasSearched ? 'התאמה מומלצת' : 'ברירת מחדל'}
+              </option>
+              <option value="cheapest">הכי זול</option>
+              <option value="closest">הכי קרוב</option>
+              <option value="fastest">הכי מהיר</option>
+            </select>
+          </div>
+
           {hasSearched && (
             <button
               type="button"
               className="ev-btn ev-btn-secondary ev-btn-auto"
               onClick={() => {
                 setQuickFilter('all');
+                setSourceFilter('all');
+                setSortBy('recommended');
                 setSelectedStationId(null);
                 void dispatch(fetchStations());
               }}
@@ -417,38 +681,377 @@ export default function StationResultsScreen() {
       <div className={`results-grid ${canRenderMap ? 'has-map' : ''}`}>
         {/* רשימת עמדות */}
         <div className="results-list">
-          {hasSearched ? (
-            filteredRecommendations.length === 0 ? (
-              <div className="ev-card" style={{ textAlign: 'center', padding: '32px' }}>
-                <p style={{ margin: '0 0 12px 0', color: 'var(--ev-ink-muted)', fontSize: '0.9rem' }}>
-                  לא נמצאו עמדות מתאימות לטווח ולסינונים שבחרת.
-                </p>
-                {quickFilter !== 'all' && (
+          {showPrivate && (
+            <>
+              {hasSearched ? (
+                filteredRecommendations.length === 0 ? (
+                  sourceFilter === 'private' || publicCount === 0 ? (
+                    <div className="ev-card" style={{ textAlign: 'center', padding: '32px' }}>
+                      <p style={{ margin: '0 0 12px 0', color: 'var(--ev-ink-muted)', fontSize: '0.9rem' }}>
+                        לא נמצאו עמדות מומלצות התואמות לנתוני החיפוש והסינון.
+                      </p>
+                      {quickFilter !== 'all' && (
+                        <button
+                          type="button"
+                          className="ev-btn ev-btn-secondary ev-btn-auto"
+                          onClick={() => setQuickFilter('all')}
+                        >
+                          נקה פילטר מהיר
+                        </button>
+                      )}
+                    </div>
+                  ) : null
+                ) : (
+                  filteredRecommendations.map((rec) => {
+                    const eta = estimateReservationWindow(rec.distanceKm);
+                    const isSelected = selectedStationId === rec.station.id;
+                    return (
+                      <div
+                        key={rec.station.id}
+                        className="ev-card station-result-card"
+                        style={{
+                          padding: '18px 20px',
+                          borderColor: isSelected
+                            ? 'var(--ev-brand)'
+                            : rec.isEmergencyMode
+                              ? 'var(--ev-danger-border)'
+                              : undefined,
+                          background: rec.isEmergencyMode ? 'var(--ev-danger-soft)' : undefined,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'flex-start',
+                            gap: '12px',
+                          }}
+                        >
+                          <div>
+                            <h3
+                              style={{
+                                margin: 0,
+                                fontSize: '1.05rem',
+                                fontWeight: 700,
+                                color: 'var(--ev-ink)',
+                              }}
+                            >
+                              {rec.station.name}
+                            </h3>
+                            <div
+                              className="tabular-nums"
+                              style={{ fontSize: '0.82rem', color: 'var(--ev-ink-muted)', marginTop: '4px' }}
+                            >
+                              {rec.station.address} · {rec.distanceKm} ק&quot;מ ממך · הגעה משוערת ~
+                              {eta.travelMinutes} דק&apos; (+{eta.bufferMinutes} דק&apos; מרווח)
+                            </div>
+                          </div>
+
+                          <div
+                            style={{
+                              background: 'var(--ev-brand-soft)',
+                              border: '1px solid var(--ev-brand-border)',
+                              borderRadius: '8px',
+                              padding: '4px 10px',
+                              textAlign: 'center',
+                              flexShrink: 0,
+                            }}
+                          >
+                            <div
+                              className="font-mono-num"
+                              style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--ev-brand)' }}
+                            >
+                              {rec.matchPercentage}%
+                            </div>
+                            <div style={{ fontSize: '0.68rem', color: 'var(--ev-ink-soft)' }}>התאמה</div>
+                          </div>
+                        </div>
+
+                        <p
+                          style={{
+                            margin: '10px 0 0 0',
+                            fontSize: '0.84rem',
+                            color: 'var(--ev-brand-hover)',
+                            fontWeight: 500,
+                          }}
+                        >
+                          {rec.matchReason}
+                        </p>
+
+                        <StationMetrics station={rec.station} />
+                        <StationNavigation
+                          latitude={rec.station.latitude}
+                          longitude={rec.station.longitude}
+                        />
+
+                        <div
+                          style={{
+                            marginTop: '14px',
+                            paddingTop: '12px',
+                            borderTop: '1px solid var(--ev-surface-subtle)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            flexWrap: 'wrap',
+                            gap: '10px',
+                          }}
+                        >
+                          <span
+                            className="tabular-nums"
+                            style={{ fontSize: '0.82rem', color: 'var(--ev-ink-muted)', fontWeight: 500 }}
+                          >
+                            {rec.station.chargerType} · {rec.station.maxKw} kW · ₪
+                            {rec.station.pricePerKwh} לקוט&quot;ש
+                          </span>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              className="ev-btn ev-btn-secondary ev-btn-auto"
+                              onClick={() => navigate(`/stations/${rec.station.id}`)}
+                            >
+                              פרטי תחנה
+                            </button>
+                            <button
+                              type="button"
+                              className="ev-btn ev-btn-secondary ev-btn-auto"
+                              onClick={() => handleFocusOnMap(rec.station.id)}
+                            >
+                              הצג במפה
+                            </button>
+                            <button
+                              type="button"
+                              className="ev-btn ev-btn-auto"
+                              disabled={reservingId === rec.station.id || hasActiveBooking}
+                              onClick={() => void handleReserveStation(rec.station, rec.distanceKm)}
+                            >
+                              {reservingId === rec.station.id
+                                ? 'משריין עמדה...'
+                                : `שריין עמדה (הגעה ~${eta.totalMinutes} דק׳)`}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )
+              ) : filteredItems.length === 0 ? (
+                sourceFilter === 'private' || publicCount === 0 ? (
+                  <div className="ev-card" style={{ textAlign: 'center', padding: '32px' }}>
+                    <p style={{ margin: '0 0 12px 0', color: 'var(--ev-ink-muted)', fontSize: '0.9rem' }}>
+                      {items.length === 0
+                        ? 'אין עדיין עמדות רשומות במסד הנתונים.'
+                        : 'אין עמדות באתר התואמות לסינון הנוכחי.'}
+                    </p>
+                    {quickFilter !== 'all' && (
+                      <button
+                        type="button"
+                        className="ev-btn ev-btn-secondary ev-btn-auto"
+                        onClick={() => setQuickFilter('all')}
+                      >
+                        נקה פילטר מהיר
+                      </button>
+                    )}
+                  </div>
+                ) : null
+              ) : (
+                filteredItems.map((station) => {
+                  const isFaulty = !station.isActive || station.currentStatus === 'Faulty';
+                  const isSelected = selectedStationId === station.id;
+                  const distKm = driverLocation
+                    ? calculateDistanceKm(
+                        driverLocation.lat,
+                        driverLocation.lng,
+                        station.latitude,
+                        station.longitude
+                      )
+                    : null;
+                  const eta = estimateReservationWindow(distKm);
+
+                  return (
+                    <div
+                      key={station.id}
+                      className="ev-card station-result-card"
+                      style={{
+                        borderColor: isSelected ? 'var(--ev-brand)' : undefined,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'flex-start',
+                          gap: '12px',
+                        }}
+                      >
+                        <div>
+                          <h3
+                            style={{
+                              margin: 0,
+                              fontSize: '1.05rem',
+                              fontWeight: 700,
+                              color: 'var(--ev-ink)',
+                            }}
+                          >
+                            {station.name}
+                          </h3>
+                          <div
+                            className="tabular-nums"
+                            style={{ fontSize: '0.82rem', color: 'var(--ev-ink-muted)', marginTop: '4px' }}
+                          >
+                            {station.address}
+                            {distKm !== null && ` · ${distKm} ק"מ ממך (הגעה ~${eta.travelMinutes} דק')`}
+                          </div>
+                        </div>
+
+                        <span
+                          style={{
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                            color: isFaulty ? 'var(--ev-danger)' : 'var(--ev-brand)',
+                          }}
+                        >
+                          {station.currentStatus ?? (station.isActive ? 'זמינה' : 'לא פעילה')}
+                        </span>
+                      </div>
+
+                      <StationMetrics station={station} />
+                      <StationNavigation
+                        latitude={station.latitude}
+                        longitude={station.longitude}
+                      />
+
+                      <div
+                        style={{
+                          marginTop: '14px',
+                          paddingTop: '12px',
+                          borderTop: '1px solid var(--ev-surface-subtle)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          flexWrap: 'wrap',
+                          gap: '10px',
+                        }}
+                      >
+                        <span
+                          className="tabular-nums"
+                          style={{ fontSize: '0.82rem', color: 'var(--ev-ink-muted)', fontWeight: 500 }}
+                        >
+                          {station.chargerType} ({station.maxKw} kW) · ₪{station.pricePerKwh} לקוט&quot;ש ·
+                          דירוג {station.averageRating !== null ? station.averageRating.toFixed(1) : 'חדשה'} (
+                          {station.reviewsCount})
+                        </span>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            className="ev-btn ev-btn-secondary ev-btn-auto"
+                            onClick={() => navigate(`/stations/${station.id}`)}
+                          >
+                            פרטי תחנה
+                          </button>
+                          <button
+                            type="button"
+                            className="ev-btn ev-btn-secondary ev-btn-auto"
+                            onClick={() => handleFocusOnMap(station.id)}
+                          >
+                            הצג במפה
+                          </button>
+                          <button
+                            type="button"
+                            className="ev-btn ev-btn-auto"
+                            disabled={!station.isActive || reservingId === station.id || hasActiveBooking}
+                            onClick={() => void handleReserveStation(station, distKm ?? undefined)}
+                          >
+                            {reservingId === station.id
+                              ? 'משריין עמדה...'
+                              : distKm !== null
+                                ? `שריין עמדה (הגעה ~${eta.totalMinutes} דק׳)`
+                                : 'שריין עמדה'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </>
+          )}
+
+          {/* עמדות ציבוריות (OpenStreetMap) */}
+          {showPublic && (
+            <>
+              {sourceFilter === 'all' && filteredPublicStations.length > 0 && (
+                <div
+                  style={{
+                    marginTop: privateCount > 0 ? '8px' : 0,
+                    padding: '4px 4px 0',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '10px',
+                  }}
+                >
+                  <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#0369A1' }}>
+                    עמדות ציבוריות בסביבה ({filteredPublicStations.length})
+                  </div>
+                  <span style={{ fontSize: '0.76rem', color: 'var(--ev-ink-soft)' }}>
+                    למידע וניווט בלבד · ללא שריון
+                  </span>
+                </div>
+              )}
+
+              {sourceFilter === 'public' && publicLoading && filteredPublicStations.length === 0 && (
+                <div className="ev-card" style={{ textAlign: 'center', padding: '28px' }}>
+                  <p style={{ margin: 0, color: 'var(--ev-ink-muted)', fontSize: '0.9rem' }}>
+                    מחפש עמדות ציבוריות בסביבה...
+                  </p>
+                </div>
+              )}
+
+              {sourceFilter === 'public' && !publicLoading && publicError && (
+                <div className="ev-card" style={{ textAlign: 'center', padding: '28px' }}>
+                  <p style={{ margin: '0 0 12px 0', color: 'var(--ev-ink-muted)', fontSize: '0.9rem' }}>
+                    {publicError}
+                  </p>
                   <button
                     type="button"
                     className="ev-btn ev-btn-secondary ev-btn-auto"
-                    onClick={() => setQuickFilter('all')}
+                    onClick={() => setPublicRetryCounter((c) => c + 1)}
                   >
-                    נקה פילטר מהיר
+                    נסה שוב
                   </button>
+                </div>
+              )}
+
+              {sourceFilter === 'public' &&
+                !publicLoading &&
+                !publicError &&
+                filteredPublicStations.length === 0 && (
+                  <div className="ev-card" style={{ textAlign: 'center', padding: '28px' }}>
+                    <p style={{ margin: '0 0 12px 0', color: 'var(--ev-ink-muted)', fontSize: '0.9rem' }}>
+                      לא נמצאו עמדות ציבוריות תואמות ברדיוס הקרוב.
+                    </p>
+                    {quickFilter !== 'all' && (
+                      <button
+                        type="button"
+                        className="ev-btn ev-btn-secondary ev-btn-auto"
+                        onClick={() => setQuickFilter('all')}
+                      >
+                        הצג את כל העמדות הציבוריות
+                      </button>
+                    )}
+                  </div>
                 )}
-              </div>
-            ) : (
-              filteredRecommendations.map((rec) => {
-                const eta = estimateReservationWindow(rec.distanceKm);
-                const isSelected = selectedStationId === rec.station.id;
+
+              {filteredPublicStations.map((pub) => {
+                const isSelected = selectedStationId === pub.id;
                 return (
                   <div
-                    key={rec.station.id}
-                    className="ev-card station-result-card"
+                    key={pub.id}
+                    className="ev-card public-station-card"
                     style={{
-                      padding: '18px 20px',
-                      borderColor: isSelected
-                        ? 'var(--ev-brand)'
-                        : rec.isEmergencyMode
-                          ? 'var(--ev-danger-border)'
-                          : undefined,
-                      background: rec.isEmergencyMode ? 'var(--ev-danger-soft)' : undefined,
+                      borderColor: isSelected ? '#0284C7' : undefined,
                     }}
                   >
                     <div
@@ -463,64 +1066,74 @@ export default function StationResultsScreen() {
                         <h3
                           style={{
                             margin: 0,
-                            fontSize: '1.05rem',
+                            fontSize: '1.02rem',
                             fontWeight: 700,
                             color: 'var(--ev-ink)',
                           }}
                         >
-                          {rec.station.name}
+                          {pub.name}
                         </h3>
                         <div
                           className="tabular-nums"
                           style={{ fontSize: '0.82rem', color: 'var(--ev-ink-muted)', marginTop: '4px' }}
                         >
-                          {rec.station.address} · {rec.distanceKm} ק&quot;מ ממך · הגעה משוערת ~
-                          {eta.travelMinutes} דק&apos; (+{eta.bufferMinutes} דק&apos; מרווח)
+                          {pub.address}
+                          {driverLocation !== null && ` · ${pub.distanceKm} ק"מ ממך`}
                         </div>
                       </div>
 
-                      <div
-                        style={{
-                          background: 'var(--ev-brand-soft)',
-                          border: '1px solid var(--ev-brand-border)',
-                          borderRadius: '8px',
-                          padding: '4px 10px',
-                          textAlign: 'center',
-                          flexShrink: 0,
-                        }}
-                      >
-                        <div
-                          className="font-mono-num"
-                          style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--ev-brand)' }}
-                        >
-                          {rec.matchPercentage}%
-                        </div>
-                        <div style={{ fontSize: '0.68rem', color: 'var(--ev-ink-soft)' }}>התאמה</div>
-                      </div>
+                      <span className="public-station-badge">עמדה ציבורית</span>
                     </div>
 
-                    <p
+                    <div
                       style={{
-                        margin: '10px 0 0 0',
-                        fontSize: '0.84rem',
-                        color: 'var(--ev-brand-hover)',
-                        fontWeight: 500,
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: '12px',
+                        marginTop: '12px',
+                        fontSize: '0.82rem',
+                        color: 'var(--ev-ink-muted)',
                       }}
                     >
-                      {rec.matchReason}
-                    </p>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                        <Plug size={14} style={{ color: '#0284C7' }} />
+                        {pub.chargerLabel}
+                      </span>
+                      {pub.maxKw !== null && (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                          <Zap size={14} style={{ color: '#0284C7' }} />
+                          {pub.maxKw} kW
+                        </span>
+                      )}
+                      {pub.openingHours && (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                          <Clock size={14} style={{ color: '#0284C7' }} />
+                          {pub.openingHours}
+                        </span>
+                      )}
+                      {(pub.feeLabel || pub.capacity !== null) && (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                          <Info size={14} style={{ color: '#0284C7' }} />
+                          {[
+                            pub.feeLabel,
+                            pub.capacity !== null ? `${pub.capacity} שקעים` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </span>
+                      )}
+                    </div>
 
-                    <StationMetrics station={rec.station} />
                     <StationNavigation
-                      latitude={rec.station.latitude}
-                      longitude={rec.station.longitude}
+                      latitude={pub.latitude}
+                      longitude={pub.longitude}
                     />
 
                     <div
                       style={{
-                        marginTop: '14px',
-                        paddingTop: '12px',
-                        borderTop: '1px solid var(--ev-surface-subtle)',
+                        marginTop: '12px',
+                        paddingTop: '10px',
+                        borderTop: '1px solid #E0F2FE',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
@@ -528,182 +1141,22 @@ export default function StationResultsScreen() {
                         gap: '10px',
                       }}
                     >
-                      <span
-                        className="tabular-nums"
-                        style={{ fontSize: '0.82rem', color: 'var(--ev-ink-muted)', fontWeight: 500 }}
-                      >
-                        {rec.station.chargerType} · {rec.station.maxKw} kW · ₪
-                        {rec.station.pricePerKwh} לקוט&quot;ש
+                      <span style={{ fontSize: '0.78rem', color: 'var(--ev-ink-soft)' }}>
+                        עמדה חיצונית מהרשת הציבורית — לניווט בלבד
                       </span>
 
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        <button
-                          type="button"
-                          className="ev-btn ev-btn-secondary ev-btn-auto"
-                          onClick={() => navigate(`/stations/${rec.station.id}`)}
-                        >
-                          פרטי תחנה
-                        </button>
-                        <button
-                          type="button"
-                          className="ev-btn ev-btn-secondary ev-btn-auto"
-                          onClick={() => handleFocusOnMap(rec.station.id)}
-                        >
-                          הצג במפה
-                        </button>
-                        <button
-                          type="button"
-                          className="ev-btn ev-btn-auto"
-                          disabled={reservingId === rec.station.id || hasActiveBooking}
-                          onClick={() => void handleReserveStation(rec.station, rec.distanceKm)}
-                        >
-                          {reservingId === rec.station.id
-                            ? 'משריין עמדה...'
-                            : `שריין עמדה (הגעה ~${eta.totalMinutes} דק׳)`}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            )
-          ) : filteredItems.length === 0 ? (
-            <div className="ev-card" style={{ textAlign: 'center', padding: '32px' }}>
-              <p style={{ margin: '0 0 12px 0', color: 'var(--ev-ink-muted)', fontSize: '0.9rem' }}>
-                {items.length === 0
-                  ? 'אין עדיין עמדות רשומות במסד הנתונים.'
-                  : 'אין עמדות התואמות לסינון הנוכחי.'}
-              </p>
-              {quickFilter !== 'all' && (
-                <button
-                  type="button"
-                  className="ev-btn ev-btn-secondary ev-btn-auto"
-                  onClick={() => setQuickFilter('all')}
-                >
-                  נקה פילטר מהיר
-                </button>
-              )}
-            </div>
-          ) : (
-            filteredItems.map((station) => {
-              const isFaulty = !station.isActive || station.currentStatus === 'Faulty';
-              const isSelected = selectedStationId === station.id;
-              const distKm = driverLocation
-                ? calculateDistanceKm(
-                    driverLocation.lat,
-                    driverLocation.lng,
-                    station.latitude,
-                    station.longitude
-                  )
-                : null;
-              const eta = estimateReservationWindow(distKm);
-
-              return (
-                <div
-                  key={station.id}
-                  className="ev-card station-result-card"
-                  style={{
-                    borderColor: isSelected ? 'var(--ev-brand)' : undefined,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'flex-start',
-                      gap: '12px',
-                    }}
-                  >
-                    <div>
-                      <h3
-                        style={{
-                          margin: 0,
-                          fontSize: '1.05rem',
-                          fontWeight: 700,
-                          color: 'var(--ev-ink)',
-                        }}
-                      >
-                        {station.name}
-                      </h3>
-                      <div
-                        className="tabular-nums"
-                        style={{ fontSize: '0.82rem', color: 'var(--ev-ink-muted)', marginTop: '4px' }}
-                      >
-                        {station.address}
-                        {distKm !== null && ` · ${distKm} ק"מ ממך (הגעה ~${eta.travelMinutes} דק')`}
-                      </div>
-                    </div>
-
-                    <span
-                      style={{
-                        fontSize: '0.78rem',
-                        fontWeight: 600,
-                        color: isFaulty ? 'var(--ev-danger)' : 'var(--ev-brand)',
-                      }}
-                    >
-                      {station.currentStatus ?? (station.isActive ? 'זמינה' : 'לא פעילה')}
-                    </span>
-                  </div>
-
-                  <StationMetrics station={station} />
-                  <StationNavigation
-                    latitude={station.latitude}
-                    longitude={station.longitude}
-                  />
-
-                  <div
-                    style={{
-                      marginTop: '14px',
-                      paddingTop: '12px',
-                      borderTop: '1px solid var(--ev-surface-subtle)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      flexWrap: 'wrap',
-                      gap: '10px',
-                    }}
-                  >
-                    <span
-                      className="tabular-nums"
-                      style={{ fontSize: '0.82rem', color: 'var(--ev-ink-muted)', fontWeight: 500 }}
-                    >
-                      {station.chargerType} ({station.maxKw} kW) · ₪{station.pricePerKwh} לקוט&quot;ש ·
-                      דירוג {station.averageRating !== null ? station.averageRating.toFixed(1) : 'חדשה'} (
-                      {station.reviewsCount})
-                    </span>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <button
                         type="button"
                         className="ev-btn ev-btn-secondary ev-btn-auto"
-                        onClick={() => navigate(`/stations/${station.id}`)}
-                      >
-                        פרטי תחנה
-                      </button>
-                      <button
-                        type="button"
-                        className="ev-btn ev-btn-secondary ev-btn-auto"
-                        onClick={() => handleFocusOnMap(station.id)}
+                        onClick={() => handleFocusOnMap(pub.id)}
                       >
                         הצג במפה
                       </button>
-                      <button
-                        type="button"
-                        className="ev-btn ev-btn-auto"
-                        disabled={!station.isActive || reservingId === station.id || hasActiveBooking}
-                        onClick={() => void handleReserveStation(station, distKm ?? undefined)}
-                      >
-                        {reservingId === station.id
-                          ? 'משריין עמדה...'
-                          : distKm !== null
-                            ? `שריין עמדה (הגעה ~${eta.totalMinutes} דק׳)`
-                            : 'שריין עמדה'}
-                      </button>
                     </div>
                   </div>
-                </div>
-              );
-            })
+                );
+              })}
+            </>
           )}
         </div>
 

@@ -2,12 +2,23 @@ import { useCallback, useEffect, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { DriverCoords, Station } from '../store/stations/stationsState';
+import './ui/DriverDashboard.css';
+
+export interface PublicStationMapMeta {
+  operator: string | null;
+  chargerLabel: string;
+  maxKw: number | null;
+  feeLabel: string | null;
+  openingHours: string | null;
+}
 
 export interface MapStationItem {
   station: Station;
   distanceKm?: number;
   matchPercentage?: number;
   etaMinutes?: number;
+  isPublic?: boolean;
+  publicMeta?: PublicStationMapMeta;
 }
 
 interface StationsMapProps {
@@ -67,6 +78,26 @@ function spreadOverlappingStations(items: MapStationItem[]): Array<{
       lng: longitude + Math.cos(angle) * radius,
     };
   });
+}
+
+function buildNavLink(href: string, label: string): HTMLAnchorElement {
+  const link = document.createElement('a');
+  link.href = href;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.textContent = label;
+  link.style.flex = '1';
+  link.style.textAlign = 'center';
+  link.style.padding = '7px 10px';
+  link.style.borderRadius = '8px';
+  link.style.border = '1px solid #CBD5E1';
+  link.style.background = '#FFFFFF';
+  link.style.color = '#0F172A';
+  link.style.fontWeight = '600';
+  link.style.fontSize = '12px';
+  link.style.textDecoration = 'none';
+  link.style.fontFamily = 'Heebo, system-ui, sans-serif';
+  return link;
 }
 
 export default function StationsMap({
@@ -220,15 +251,30 @@ export default function StationsMap({
     const spreadStations = spreadOverlappingStations(stations);
 
     spreadStations.forEach(({ item, lat, lng }) => {
-      const { station, distanceKm, matchPercentage, etaMinutes } = item;
-      const isFaulty = !station.isActive || station.currentStatus === 'Faulty';
+      const { station, distanceKm, matchPercentage, etaMinutes, isPublic, publicMeta } = item;
       const isSelected = selectedStationId === station.id;
-      const bgColor = isFaulty ? '#DC2626' : isSelected ? '#0F172A' : '#EA580C';
-      const label = isFaulty ? 'תקלה' : `${station.maxKw}kW`;
+
+      let bgColor: string;
+      let label: string;
+      let badgeClasses = 'ev-map-pin-badge';
+
+      if (isPublic) {
+        bgColor = isSelected ? '#0F172A' : '#0284C7';
+        label = 'ציבורית';
+        badgeClasses += ' public-pin';
+      } else {
+        const isFaulty = !station.isActive || station.currentStatus === 'Faulty';
+        bgColor = isFaulty ? '#DC2626' : isSelected ? '#0F172A' : '#EA580C';
+        label = isFaulty ? 'תקלה' : `${station.maxKw}kW`;
+      }
+
+      if (isSelected) {
+        badgeClasses += ' selected';
+      }
 
       const stationIcon = L.divIcon({
         className: 'ev-map-pin-anchor',
-        html: `<div class="ev-map-pin-badge${isSelected ? ' selected' : ''}" style="background:${bgColor};">${label}</div>`,
+        html: `<div class="${badgeClasses}" style="background:${bgColor};">${label}</div>`,
         iconSize: [0, 0],
         iconAnchor: [0, 0],
       });
@@ -237,6 +283,20 @@ export default function StationsMap({
       popupContainer.setAttribute('dir', 'rtl');
       popupContainer.style.minWidth = '210px';
       popupContainer.style.color = '#0F172A';
+
+      if (isPublic) {
+        const publicTag = document.createElement('div');
+        publicTag.textContent = 'עמדה ציבורית · ניווט בלבד';
+        publicTag.style.display = 'inline-block';
+        publicTag.style.marginBottom = '6px';
+        publicTag.style.padding = '2px 7px';
+        publicTag.style.borderRadius = '6px';
+        publicTag.style.background = '#E0F2FE';
+        publicTag.style.color = '#0369A1';
+        publicTag.style.fontSize = '11px';
+        publicTag.style.fontWeight = '700';
+        popupContainer.appendChild(publicTag);
+      }
 
       const title = document.createElement('div');
       title.style.fontWeight = '700';
@@ -252,66 +312,100 @@ export default function StationsMap({
       addr.textContent = station.address;
       popupContainer.appendChild(addr);
 
-      const details = document.createElement('div');
-      details.style.fontSize = '12px';
-      details.style.color = '#0F172A';
-      details.style.fontWeight = '500';
-      details.style.marginBottom = '10px';
-      const matchText = matchPercentage !== undefined ? `${matchPercentage}% התאמה · ` : '';
-      const distText = distanceKm !== undefined ? `${distanceKm} ק"מ · ` : '';
-      details.textContent = `${matchText}${distText}${station.chargerType} · ₪${station.pricePerKwh}`;
-      popupContainer.appendChild(details);
+      if (isPublic) {
+        const parts: string[] = [];
+        if (distanceKm !== undefined) parts.push(`${distanceKm} ק"מ`);
+        if (publicMeta?.chargerLabel) parts.push(publicMeta.chargerLabel);
+        if (publicMeta?.maxKw) parts.push(`${publicMeta.maxKw} kW`);
+        if (publicMeta?.feeLabel) parts.push(publicMeta.feeLabel);
+        if (publicMeta?.openingHours) parts.push(publicMeta.openingHours);
 
-      if (!isFaulty) {
-        const reserveBtn = document.createElement('button');
-        reserveBtn.type = 'button';
-        const windowText =
-          distanceKm !== undefined && etaMinutes !== undefined
-            ? `הגעה ~${etaMinutes} דק׳`
-            : 'שמירה אוטומטית';
-        reserveBtn.textContent =
-          reservingId === station.id
-            ? 'משריין...'
-            : hasActiveBooking
-              ? 'קיימת הזמנה פעילה'
-              : `שריין עמדה (${windowText})`;
-        reserveBtn.disabled = hasActiveBooking || reservingId === station.id;
-        reserveBtn.style.width = '100%';
-        reserveBtn.style.padding = '8px 12px';
-        reserveBtn.style.border = 'none';
-        reserveBtn.style.borderRadius = '8px';
-        reserveBtn.style.background = hasActiveBooking ? '#94A3B8' : '#0F172A';
-        reserveBtn.style.color = '#FFFFFF';
-        reserveBtn.style.fontWeight = '600';
-        reserveBtn.style.fontSize = '12px';
-        reserveBtn.style.fontFamily = 'Heebo, system-ui, sans-serif';
-        reserveBtn.style.cursor = hasActiveBooking ? 'not-allowed' : 'pointer';
-        reserveBtn.addEventListener('click', () => onReserveRef.current(station, distanceKm));
-        popupContainer.appendChild(reserveBtn);
-      }
+        if (parts.length > 0) {
+          const details = document.createElement('div');
+          details.style.fontSize = '12px';
+          details.style.color = '#0F172A';
+          details.style.fontWeight = '500';
+          details.style.marginBottom = '10px';
+          details.textContent = parts.join(' · ');
+          popupContainer.appendChild(details);
+        }
 
-      if (onOpenDetailsRef.current) {
-        const detailsBtn = document.createElement('button');
-        detailsBtn.type = 'button';
-        detailsBtn.textContent = 'פרטי תחנה וביקורות';
-        detailsBtn.style.width = '100%';
-        detailsBtn.style.marginTop = '6px';
-        detailsBtn.style.padding = '7px 12px';
-        detailsBtn.style.border = '1px solid #CBD5E1';
-        detailsBtn.style.borderRadius = '8px';
-        detailsBtn.style.background = '#FFFFFF';
-        detailsBtn.style.color = '#0F172A';
-        detailsBtn.style.fontWeight = '600';
-        detailsBtn.style.fontSize = '12px';
-        detailsBtn.style.fontFamily = 'Heebo, system-ui, sans-serif';
-        detailsBtn.style.cursor = 'pointer';
-        detailsBtn.addEventListener('click', () => onOpenDetailsRef.current?.(station));
-        popupContainer.appendChild(detailsBtn);
+        const navRow = document.createElement('div');
+        navRow.style.display = 'flex';
+        navRow.style.gap = '6px';
+        navRow.appendChild(
+          buildNavLink(`https://waze.com/ul?ll=${lat},${lng}&navigate=yes`, 'Waze')
+        );
+        navRow.appendChild(
+          buildNavLink(
+            `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&dir_action=navigate`,
+            'Google Maps'
+          )
+        );
+        popupContainer.appendChild(navRow);
+      } else {
+        const isFaulty = !station.isActive || station.currentStatus === 'Faulty';
+        const details = document.createElement('div');
+        details.style.fontSize = '12px';
+        details.style.color = '#0F172A';
+        details.style.fontWeight = '500';
+        details.style.marginBottom = '10px';
+        const matchText = matchPercentage !== undefined ? `${matchPercentage}% התאמה · ` : '';
+        const distText = distanceKm !== undefined ? `${distanceKm} ק"מ · ` : '';
+        details.textContent = `${matchText}${distText}${station.chargerType} · ₪${station.pricePerKwh}`;
+        popupContainer.appendChild(details);
+
+        if (!isFaulty) {
+          const reserveBtn = document.createElement('button');
+          reserveBtn.type = 'button';
+          const windowText =
+            distanceKm !== undefined && etaMinutes !== undefined
+              ? `הגעה ~${etaMinutes} דק׳`
+              : 'שמירה אוטומטית';
+          reserveBtn.textContent =
+            reservingId === station.id
+              ? 'משריין...'
+              : hasActiveBooking
+                ? 'קיימת הזמנה פעילה'
+                : `שריין עמדה (${windowText})`;
+          reserveBtn.disabled = hasActiveBooking || reservingId === station.id;
+          reserveBtn.style.width = '100%';
+          reserveBtn.style.padding = '8px 12px';
+          reserveBtn.style.border = 'none';
+          reserveBtn.style.borderRadius = '8px';
+          reserveBtn.style.background = hasActiveBooking ? '#94A3B8' : '#0F172A';
+          reserveBtn.style.color = '#FFFFFF';
+          reserveBtn.style.fontWeight = '600';
+          reserveBtn.style.fontSize = '12px';
+          reserveBtn.style.fontFamily = 'Heebo, system-ui, sans-serif';
+          reserveBtn.style.cursor = hasActiveBooking ? 'not-allowed' : 'pointer';
+          reserveBtn.addEventListener('click', () => onReserveRef.current(station, distanceKm));
+          popupContainer.appendChild(reserveBtn);
+        }
+
+        if (onOpenDetailsRef.current) {
+          const detailsBtn = document.createElement('button');
+          detailsBtn.type = 'button';
+          detailsBtn.textContent = 'פרטי תחנה וביקורות';
+          detailsBtn.style.width = '100%';
+          detailsBtn.style.marginTop = '6px';
+          detailsBtn.style.padding = '7px 12px';
+          detailsBtn.style.border = '1px solid #CBD5E1';
+          detailsBtn.style.borderRadius = '8px';
+          detailsBtn.style.background = '#FFFFFF';
+          detailsBtn.style.color = '#0F172A';
+          detailsBtn.style.fontWeight = '600';
+          detailsBtn.style.fontSize = '12px';
+          detailsBtn.style.fontFamily = 'Heebo, system-ui, sans-serif';
+          detailsBtn.style.cursor = 'pointer';
+          detailsBtn.addEventListener('click', () => onOpenDetailsRef.current?.(station));
+          popupContainer.appendChild(detailsBtn);
+        }
       }
 
       const marker = L.marker([lat, lng], {
         icon: stationIcon,
-        zIndexOffset: isSelected ? 400 : 100,
+        zIndexOffset: isSelected ? 400 : isPublic ? 50 : 100,
       });
       marker.bindPopup(popupContainer);
       marker.addTo(layerGroup);
@@ -346,6 +440,8 @@ export default function StationsMap({
     fitMapToPoints(computeBoundsPoints(), true);
   };
 
+  const hasPublicStations = stations.some((s) => s.isPublic);
+
   return (
     <div>
       <div className="ev-map-toolbar">
@@ -356,8 +452,17 @@ export default function StationsMap({
           </span>
           <span className="ev-map-legend-item">
             <span className="ev-map-dot" style={{ background: '#EA580C' }} />
-            עמדה זמינה
+            {hasPublicStations ? 'עמדת האתר' : 'עמדה זמינה'}
           </span>
+          {hasPublicStations && (
+            <span className="ev-map-legend-item">
+              <span
+                className="ev-map-dot"
+                style={{ background: '#0284C7', width: '8px', height: '8px' }}
+              />
+              עמדה ציבורית
+            </span>
+          )}
           <span className="ev-map-legend-item">
             <span className="ev-map-dot" style={{ background: '#DC2626' }} />
             תקלה / לא פעילה

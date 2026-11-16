@@ -5,9 +5,10 @@ import {
   Route,
   Routes,
   NavLink,
+  useLocation,
   useNavigate,
 } from 'react-router-dom';
-import { Zap, Mic } from 'lucide-react';
+import { Zap } from 'lucide-react';
 import RoleSwitcher from './components/RoleSwitcher';
 import AdminDashboard from './components/admin/AdminDashboard';
 import HomeScreen from './components/HomeScreen';
@@ -34,6 +35,16 @@ import {
 } from './store/user/userSlice';
 import './App.css';
 import './Modern.css';
+
+function ScrollToTop() {
+  const { pathname } = useLocation();
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [pathname]);
+
+  return null;
+}
 
 function getHomePath(
   token: string | null,
@@ -111,9 +122,11 @@ function Layout() {
 
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
 
   const isAdmin = isAdminToken(token);
   const homePath = getHomePath(token, role);
+  const showRouteBg = pathname !== '/' && pathname !== '/login';
 
   useEffect(() => {
     const handleSessionExpired = () => {
@@ -143,7 +156,66 @@ function Layout() {
   }
 
   return (
-    <div className="ev-app-shell" dir="rtl">
+    <div
+      className={`ev-app-shell${showRouteBg ? ' with-route-bg' : ''}`}
+      dir="rtl"
+    >
+      {showRouteBg && (
+        <svg
+          className="ev-bg-route-svg"
+          viewBox="0 0 1440 900"
+          preserveAspectRatio="xMidYMid slice"
+          aria-hidden="true"
+        >
+          <path
+            d="M -40 165 Q 380 55 780 145 T 1490 95"
+            fill="none"
+            stroke="#EA580C"
+            strokeWidth="2"
+            strokeDasharray="7 8"
+            strokeOpacity="0.34"
+          />
+          <path
+            d="M -60 220 Q 440 110 920 205 T 1500 155"
+            fill="none"
+            stroke="#EA580C"
+            strokeWidth="1.6"
+            strokeOpacity="0.18"
+          />
+          <path
+            d="M -40 480 C 310 340, 690 540, 1080 370 S 1400 290, 1500 350"
+            fill="none"
+            stroke="#EA580C"
+            strokeWidth="2"
+            strokeDasharray="7 8"
+            strokeOpacity="0.3"
+          />
+          <path
+            d="M -60 760 Q 410 630 880 770 T 1500 680"
+            fill="none"
+            stroke="#475569"
+            strokeWidth="1.8"
+            strokeDasharray="6 8"
+            strokeOpacity="0.22"
+          />
+
+          <circle cx="360" cy="105" r="10" fill="#EA580C" fillOpacity="0.1" />
+          <circle cx="360" cy="105" r="4" fill="#EA580C" fillOpacity="0.38" />
+
+          <circle cx="1020" cy="132" r="11" fill="#EA580C" fillOpacity="0.1" />
+          <circle cx="1020" cy="132" r="4.5" fill="#EA580C" fillOpacity="0.38" />
+
+          <circle cx="180" cy="420" r="9" fill="#EA580C" fillOpacity="0.09" />
+          <circle cx="180" cy="420" r="3.5" fill="#EA580C" fillOpacity="0.32" />
+
+          <circle cx="1260" cy="340" r="10" fill="#EA580C" fillOpacity="0.09" />
+          <circle cx="1260" cy="340" r="4" fill="#EA580C" fillOpacity="0.34" />
+
+          <circle cx="880" cy="770" r="10" fill="#475569" fillOpacity="0.08" />
+          <circle cx="880" cy="770" r="4" fill="#475569" fillOpacity="0.28" />
+        </svg>
+      )}
+
       <header className="modern-header">
         <div className="modern-header-inner">
           <NavLink
@@ -189,19 +261,6 @@ function Layout() {
                       <NavLink to="/active">
                         השריון שלי
                       </NavLink>
-
-                      <button
-                        type="button"
-                        className="modern-ai-nav"
-                        onClick={() => {
-                          window.dispatchEvent(
-                            new Event('smart-ev:open-assistant')
-                          );
-                        }}
-                      >
-                        <Mic size={17} />
-                        עוזר AI
-                      </button>
                     </>
                   )}
 
@@ -276,99 +335,102 @@ export default function App() {
   const homePath = getHomePath(token, role);
 
   return (
-    <Routes>
-      <Route element={<Layout />}>
-        <Route
-          path="/"
-          element={<HomeScreen />}
-        />
+    <>
+      <ScrollToTop />
+      <Routes>
+        <Route element={<Layout />}>
+          <Route
+            path="/"
+            element={<HomeScreen />}
+          />
 
-        <Route
-          path="/login"
-          element={
-            token
-              ? <Navigate to={homePath} replace />
-              : <LoginScreen />
-          }
-        />
+          <Route
+            path="/login"
+            element={
+              token
+                ? <Navigate to={homePath} replace />
+                : <LoginScreen />
+            }
+          />
 
-        <Route
-          path="/search"
-          element={
-            <ProtectedRoute requiredRole="Driver">
-              <DriverSearchScreen />
-            </ProtectedRoute>
-          }
-        />
+          <Route
+            path="/search"
+            element={
+              <ProtectedRoute requiredRole="Driver">
+                <DriverSearchScreen />
+              </ProtectedRoute>
+            }
+          />
 
-        <Route
-          path="/results"
-          element={
-            <ProtectedRoute requiredRole="Driver">
-              <StationResultsScreen />
-            </ProtectedRoute>
-          }
-        />
+          <Route
+            path="/results"
+            element={
+              <ProtectedRoute requiredRole="Driver">
+                <StationResultsScreen />
+              </ProtectedRoute>
+            }
+          />
 
-        <Route
-          path="/stations/:id"
-          element={
-            <ProtectedRoute requiredRole="Driver">
-              <StationDetailsScreen />
-            </ProtectedRoute>
-          }
-        />
+          <Route
+            path="/stations/:id"
+            element={
+              <ProtectedRoute requiredRole="Driver">
+                <StationDetailsScreen />
+              </ProtectedRoute>
+            }
+          />
 
-        <Route
-          path="/active"
-          element={
-            <ProtectedRoute requiredRole="Driver">
-              <ActiveSessionScreen />
-            </ProtectedRoute>
-          }
-        />
+          <Route
+            path="/active"
+            element={
+              <ProtectedRoute requiredRole="Driver">
+                <ActiveSessionScreen />
+              </ProtectedRoute>
+            }
+          />
 
-        <Route
-          path="/rating"
-          element={
-            <ProtectedRoute requiredRole="Driver">
-              <RatingAndReportScreen />
-            </ProtectedRoute>
-          }
-        />
+          <Route
+            path="/rating"
+            element={
+              <ProtectedRoute requiredRole="Driver">
+                <RatingAndReportScreen />
+              </ProtectedRoute>
+            }
+          />
 
-        <Route
-          path="/profile"
-          element={
-            <ProtectedRoute>
-              <UserProfileScreen />
-            </ProtectedRoute>
-          }
-        />
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <UserProfileScreen />
+              </ProtectedRoute>
+            }
+          />
 
-        <Route
-          path="/owner"
-          element={
-            <ProtectedRoute requiredRole="Owner">
-              <StationOwnerScreen />
-            </ProtectedRoute>
-          }
-        />
+          <Route
+            path="/owner"
+            element={
+              <ProtectedRoute requiredRole="Owner">
+                <StationOwnerScreen />
+              </ProtectedRoute>
+            }
+          />
 
-        <Route
-          path="/admin"
-          element={
-            <AdminRoute>
-              <AdminDashboard />
-            </AdminRoute>
-          }
-        />
+          <Route
+            path="/admin"
+            element={
+              <AdminRoute>
+                <AdminDashboard />
+              </AdminRoute>
+            }
+          />
 
-        <Route
-          path="*"
-          element={<Navigate to="/" replace />}
-        />
-      </Route>
-    </Routes>
+          <Route
+            path="*"
+            element={<Navigate to="/" replace />}
+          />
+        </Route>
+      </Routes>
+    </>
   );
 }
