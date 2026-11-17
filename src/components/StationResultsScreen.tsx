@@ -12,6 +12,7 @@ import StationsMap, { type MapStationItem } from './StationsMap';
 import PageHeader from './ui/PageHeader';
 import StationMetrics from './ui/StationMetrics';
 import StationNavigation from './ui/StationNavigation';
+import RouteStopMetrics from './ui/RouteStopMetrics';
 import './ui/DriverDashboard.css';
 
 interface BookingStatusOnly {
@@ -110,7 +111,12 @@ export default function StationResultsScreen() {
     selectedVehicleId,
     loading,
     error,
+    routeResult,
+    destination,
   } = useAppSelector((state) => state.stations);
+
+  // מצב מסלול פעיל = החיפוש האחרון היה עם יעד (ועדיין מוצגות תוצאות החיפוש)
+  const isRouteMode = hasSearched && routeResult !== null;
 
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [hasActiveBooking, setHasActiveBooking] = useState<boolean>(false);
@@ -531,7 +537,11 @@ export default function StationResultsScreen() {
 
           <div>
             <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--ev-ink)' }}>
-              {hasSearched ? 'המלצות מותאמות אישית' : 'כל עמדות הטעינה'}
+              {isRouteMode
+                ? 'עצירות מומלצות בדרך'
+                : hasSearched
+                  ? 'המלצות מותאמות אישית'
+                  : 'כל עמדות הטעינה'}
             </div>
             <div className="tabular-nums" style={{ fontSize: '0.78rem', color: 'var(--ev-ink-soft)' }}>
               {countSummary}
@@ -636,6 +646,27 @@ export default function StationResultsScreen() {
         </div>
       </div>
 
+      {/* באנר מצב מסלול: "אין צורך בטעינה" / סיכום המסלול / "לא נמצאה עמדה" */}
+      {isRouteMode && routeResult && (
+        <div
+          className={routeResult.noChargeNeeded || routeResult.stations.length > 0 ? 'ev-alert-brand' : 'ev-alert-error'}
+          style={{ marginBottom: 0 }}
+        >
+          <div style={{ fontWeight: 700, fontSize: '1rem' }}>
+            {routeResult.noChargeNeeded
+              ? '✅ אין צורך בטעינה'
+              : routeResult.stations.length > 0
+                ? '🔌 מומלץ לעצור לטעינה בדרך'
+                : '⚠️ לא נמצאה עצירה מתאימה בדרך'}
+          </div>
+          <div className="tabular-nums" style={{ fontSize: '0.86rem', marginTop: '4px' }}>
+            {destination ? `יעד: ${destination.label} · ` : ''}
+            נסיעה ~{routeResult.tripKm} ק&quot;מ · טווח הסוללה (אחרי רזרבה) ~{routeResult.rangeKm} ק&quot;מ
+          </div>
+          <div style={{ fontSize: '0.86rem', marginTop: '4px' }}>{routeResult.message}</div>
+        </div>
+      )}
+
       {hasActiveBooking && (
         <div
           className="ev-alert-brand"
@@ -685,7 +716,8 @@ export default function StationResultsScreen() {
             <>
               {hasSearched ? (
                 filteredRecommendations.length === 0 ? (
-                  sourceFilter === 'private' || publicCount === 0 ? (
+                  // במצב מסלול הבאנר כבר מסביר למה אין עמדות – לא מציגים הודעה כפולה
+                  !isRouteMode && (sourceFilter === 'private' || publicCount === 0) ? (
                     <div className="ev-card" style={{ textAlign: 'center', padding: '32px' }}>
                       <p style={{ margin: '0 0 12px 0', color: 'var(--ev-ink-muted)', fontSize: '0.9rem' }}>
                         לא נמצאו עמדות מומלצות התואמות לנתוני החיפוש והסינון.
@@ -777,6 +809,9 @@ export default function StationResultsScreen() {
                         >
                           {rec.matchReason}
                         </p>
+
+                        {/* במצב מסלול: עקיפה, כמה לטעון, עלות, זמן נוסף, % ביעד */}
+                        <RouteStopMetrics rec={rec} />
 
                         <StationMetrics station={rec.station} />
                         <StationNavigation
