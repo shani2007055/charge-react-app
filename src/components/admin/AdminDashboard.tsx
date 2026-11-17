@@ -119,7 +119,6 @@ interface PendingAdminAction {
 
 function formatDate(value: string) {
   const date = new Date(value);
-
   return Number.isNaN(date.getTime())
     ? '—'
     : date.toLocaleString('he-IL');
@@ -149,7 +148,6 @@ function getTable(
           ],
         })),
       };
-
     case 'drivers':
       return {
         headers: [
@@ -166,7 +164,6 @@ function getTable(
           ],
         })),
       };
-
     case 'owners':
       return {
         headers: [
@@ -182,7 +179,6 @@ function getTable(
           ],
         })),
       };
-
     case 'stations':
       return {
         headers: [
@@ -203,7 +199,6 @@ function getTable(
           ],
         })),
       };
-
     case 'vehicles':
       return {
         headers: [
@@ -220,7 +215,6 @@ function getTable(
           ],
         })),
       };
-
     case 'bookings':
       return {
         headers: [
@@ -242,7 +236,6 @@ function getTable(
           ],
         })),
       };
-
     case 'reviews':
       return {
         headers: [
@@ -259,7 +252,6 @@ function getTable(
           ],
         })),
       };
-
     case 'logs':
       return {
         headers: [
@@ -277,7 +269,6 @@ function getTable(
           ],
         })),
       };
-
     default:
       return { headers: [], rows: [] };
   }
@@ -287,19 +278,16 @@ export default function AdminDashboard() {
   const { id: currentUserId, name, token } = useAppSelector(
     (state) => state.user
   );
-
   const [page, setPage] = useState<AdminPage>('overview');
   const [data, setData] = useState<AdminData>(emptyAdminData);
   const [errors, setErrors] = useState<
     Partial<Record<AdminSection, string>>
   >({});
-
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
   const [search, setSearch] = useState('');
   const [pageNumber, setPageNumber] = useState(1);
   const [onlyFaults, setOnlyFaults] = useState(false);
-
   const [pendingAction, setPendingAction] =
     useState<PendingAdminAction | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -308,14 +296,12 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     const controller = new AbortController();
-
     setLoading(true);
     setErrors({});
     setData(emptyAdminData);
 
     void fetchAdminData(controller.signal).then((result) => {
       if (controller.signal.aborted) return;
-
       setData(result.data);
       setErrors(result.errors);
       setLoading(false);
@@ -339,15 +325,12 @@ export default function AdminDashboard() {
 
   const filteredRows = useMemo(() => {
     const query = search.trim().toLowerCase();
-
     return table.rows.filter((row) => {
       if (page === 'logs' && onlyFaults) {
         const statusValue = String(row.cells[2] ?? '').toLowerCase();
         if (statusValue !== 'faulty') return false;
       }
-
       if (!query) return true;
-
       return row.cells.some((cell) =>
         String(cell ?? '').toLowerCase().includes(query)
       );
@@ -379,7 +362,6 @@ export default function AdminDashboard() {
       faulty: 0,
       inactive: 0,
     };
-
     for (const s of data.stations) {
       if (!s.isActive) {
         counts.inactive += 1;
@@ -394,7 +376,6 @@ export default function AdminDashboard() {
         counts.available += 1;
       }
     }
-
     return [
       { label: 'זמינות', count: counts.available, color: '#16a34a' },
       { label: 'תפוסות / משוריינות', count: counts.busy, color: '#ea580c' },
@@ -422,7 +403,6 @@ export default function AdminDashboard() {
     setActionLoading(true);
     setActionError(null);
     setActionSuccess(null);
-
     try {
       await pendingAction.run();
       setActionSuccess(pendingAction.successMessage);
@@ -555,7 +535,6 @@ export default function AdminDashboard() {
             <small>מנהל מערכת · {name}</small>
           </div>
         </div>
-
         <nav>
           {navigation.map((item) => {
             const Icon = item.icon;
@@ -572,7 +551,6 @@ export default function AdminDashboard() {
             );
           })}
         </nav>
-
         <div className="admin-sidebar-footer">
           <ShieldCheck size={16} />
           <span>הרשאות מנהל מלאות</span>
@@ -704,26 +682,6 @@ export default function AdminDashboard() {
                     </div>
                   ))
                 )}
-              </section>
-
-              <section className="admin-panel">
-                <h2>מעבר מהיר לניהול</h2>
-                <div className="admin-shortcuts">
-                  {navigation.slice(1).map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => changePage(item.id)}
-                      >
-                        <Icon size={23} />
-                        {item.label}
-                        <ChevronLeft size={16} />
-                      </button>
-                    );
-                  })}
-                </div>
               </section>
             </div>
           </>
