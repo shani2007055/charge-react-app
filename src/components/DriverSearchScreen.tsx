@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { fetchStations, recommendStations } from '../store/stations/stationsThunks';
+import { fetchStations, recommendRoute, recommendStations } from '../store/stations/stationsThunks';
 import {
+  setDestination,
   setDriverLocation,
   setSearchBattery,
   setSelectedVehicle,
 } from '../store/stations/stationsSlice';
+import type { DestinationPoint } from '../store/stations/stationsState';
 import PageHeader from './ui/PageHeader';
 import { MapPin, ListFilter } from 'lucide-react';
 import VehicleSelector from './ui/VehicleSelector';
 import type { Vehicle } from '../types/Vehicle';
+import AddressAutocomplete from './ui/AddressAutocomplete';
+import { searchAddresses } from '../utils/geocoding';
+import { estimateRangeKm } from '../utils/routeRules';
 
 interface NominatimAddress {
   road?: string;
@@ -58,13 +63,14 @@ function formatCleanAddress(item: NominatimResult): string {
     .join(', ');
 }
 
-function getBatteryIndicator(val: number): {
+function getBatteryIndicator(val: number, capacityKwh?: number | null): {
   estimatedRange: string;
   statusText: string;
   color: string;
 } {
   const safeVal = Number.isFinite(val) ? Math.min(100, Math.max(0, val)) : 0;
-  const estimatedRange = `כ-${Math.round(safeVal * 3)} ק"מ`;
+  // אותה נוסחה כמו בשרת: (אחוז × קיבולת הרכב) ÷ 0.18 קוט"ש לק"מ
+  const estimatedRange = `כ-${Math.round(estimateRangeKm(safeVal, capacityKwh))} ק"מ`;
 
   if (safeVal <= 15) {
     return {
@@ -101,7 +107,6 @@ export default function DriverSearchScreen() {
 
   const [batteryLevel, setBatteryLevel] = useState<number>(currentBatteryPercent);
   const [targetBattery, setTargetBattery] = useState<number>(targetBatteryPercent);
-  const [estimatedRange, setEstimatedRange] = useState<string>(initialIndicator.estimatedRange);
   const [batteryStatusText, setBatteryStatusText] = useState<string>(initialIndicator.statusText);
   const [batteryColor, setBatteryColor] = useState<string>(initialIndicator.color);
 
@@ -122,6 +127,14 @@ export default function DriverSearchScreen() {
   const skipNextAutocompleteRef = useRef<boolean>(false);
 
   const [selectedVehicle, setVehicle] = useState<Vehicle | null>(null);
+
+  // === יעד (מצב מסלול): אם הוזן – מחפשים איפה הכי משתלם לעצור בדרך ===
+  const [destinationText, setDestinationText] = useState<string>('');
+  const [destinationPoint, setDestinationPoint] = useState<DestinationPoint | null>(null);
+  const isRouteMode = destinationText.trim().length > 0;
+
+  // טווח משוער לפי הסוללה וקיבולת הרכב שנבחר (מחושב מחדש בכל רינדור – לא צריך state)
+  const estimatedRange = getBatteryIndicator(batteryLevel, selectedVehicle?.batteryCapacityKwh).estimatedRange;
   const isBusy = loading || searchingLocation;
 
   // חישוב אומדן טעינה ועלות מראש (צד לקוח בלבד)
@@ -203,7 +216,6 @@ export default function DriverSearchScreen() {
     (val: number, overrideTarget?: number) => {
       const meta = getBatteryIndicator(val);
       setBatteryLevel(val);
-      setEstimatedRange(meta.estimatedRange);
       setBatteryStatusText(meta.statusText);
       setBatteryColor(meta.color);
 
@@ -366,6 +378,23 @@ export default function DriverSearchScreen() {
     };
   }
 
+  // היעד: אם נבחרה הצעה מהרשימה – משתמשים בה; אחרת מחפשים את הטקסט ולוקחים את התוצאה הראשונה
+  async function resolveDestination(): Promise<DestinationPoint> {
+    if (destinationPoint) {
+      return destinationPoint;
+    }
+
+    const trimmed = destinationText.trim();
+    const results = await searchAddresses(trimmed, undefined, 1);
+    if (results.length === 0) {
+      throw new Error(`לא מצאנו את היעד "${trimmed}". נסי שם עיר או כתובת ברורה יותר.`);
+    }
+
+    const point: DestinationPoint = { lat: results[0].lat, lng: results[0].lng, label: results[0].label };
+    setDestinationPoint(point);
+    return point;
+  }
+
   function getWeightsByPriority(selected: string) {
     if (selected === 'distance') {
       return { weightDistance: 0.7, weightRating: 0.1, weightPrice: 0.1, weightSpeed: 0.1 };
@@ -415,7 +444,8 @@ export default function DriverSearchScreen() {
       return;
     }
 
-    if (targetBattery <= requestedBattery || targetBattery > 100) {
+    // יעד טעינה רלוונטי רק במצב רדיוס (במצב מסלול האלגוריתם מחשב בעצמו כמה צריך לטעון)
+    if (!isRouteMode && (targetBattery <= requestedBattery || targetBattery > 100)) {
       setErrorMessage('יעד הטעינה חייב להיות גבוה ממצב הסוללה הנוכחי.');
       return;
     }
@@ -432,17 +462,34 @@ export default function DriverSearchScreen() {
       dispatch(setDriverLocation(coords));
       const weights = getWeightsByPriority(priority);
 
-      await dispatch(
-        recommendStations({
-          driverLatitude: coords.lat,
-          driverLongitude: coords.lng,
-          batteryPercentage: actualBattery,
-          availableTimeMinutes,
-          requiredChargerType: chargerType || null,
-          minRating: null,
-          ...weights,
-        })
-      ).unwrap();
+      const baseRequest = {
+        driverLatitude: coords.lat,
+        driverLongitude: coords.lng,
+        batteryPercentage: actualBattery,
+        availableTimeMinutes,
+        requiredChargerType: chargerType || null,
+        minRating: null,
+        batteryCapacityKwh: selectedVehicle.batteryCapacityKwh,   // קיבולת הסוללה של הרכב שנבחר
+        ...weights,
+      };
+
+      if (isRouteMode) {
+        // === מצב מסלול: מוצא + יעד → איפה הכי משתלם לעצור בדרך ===
+        const destination = await resolveDestination();
+        dispatch(setDestination(destination));
+
+        await dispatch(
+          recommendRoute({
+            ...baseRequest,
+            destinationLatitude: destination.lat,
+            destinationLongitude: destination.lng,
+          })
+        ).unwrap();
+      } else {
+        // === מצב רדיוס (כמו קודם): עמדות סביב הנהג ===
+        dispatch(setDestination(null));
+        await dispatch(recommendStations(baseRequest)).unwrap();
+      }
 
       navigate('/results');
     } catch (err) {
@@ -512,12 +559,12 @@ export default function DriverSearchScreen() {
             />
 
             <div className="form-group" style={{ position: 'relative' }}>
-              <label>מיקום נוכחי או כתובת יעד</label>
+              <label>מיקום נוכחי (מוצא)</label>
               <div style={{ display: 'flex', gap: '8px' }}>
                 <input
                   type="text"
                   className="form-control"
-                  placeholder="מיקום נוכחי או כתובת יעד..."
+                  placeholder="מיקום נוכחי או כתובת מוצא..."
                   value={locationText}
                   onChange={(e) => {
                     setLocationText(e.target.value);
@@ -593,6 +640,27 @@ export default function DriverSearchScreen() {
               )}
             </div>
 
+            <AddressAutocomplete
+              label="יעד (לא חובה) – למציאת עצירה משתלמת בדרך"
+              placeholder="לאן נוסעים? למשל: פתח תקווה"
+              value={destinationText}
+              isSelected={destinationPoint !== null}
+              disabled={isBusy}
+              onChange={(text) => {
+                setDestinationText(text);
+                setDestinationPoint(null);   // טקסט חדש = היעד הקודם כבר לא תקף
+              }}
+              onSelect={(item) => {
+                setDestinationText(item.label);
+                setDestinationPoint({ lat: item.lat, lng: item.lng, label: item.label });
+                setErrorMessage('');
+              }}
+              onClear={() => {
+                setDestinationText('');
+                setDestinationPoint(null);
+              }}
+            />
+
             <div
               style={{
                 display: 'grid',
@@ -611,17 +679,20 @@ export default function DriverSearchScreen() {
                   onChange={handleBatteryChange}
                 />
               </div>
-              <div className="form-group">
-                <label>יעד טעינה רצוי (%)</label>
-                <input
-                  type="number"
-                  min={10}
-                  max={100}
-                  className="form-control tabular-nums"
-                  value={targetBattery}
-                  onChange={handleTargetBatteryChange}
-                />
-              </div>
+              {/* במצב מסלול האלגוריתם מחשב בעצמו כמה צריך לטעון – אין צורך ביעד טעינה */}
+              {!isRouteMode && (
+                <div className="form-group">
+                  <label>יעד טעינה רצוי (%)</label>
+                  <input
+                    type="number"
+                    min={10}
+                    max={100}
+                    className="form-control tabular-nums"
+                    value={targetBattery}
+                    onChange={handleTargetBatteryChange}
+                  />
+                </div>
+              )}
             </div>
 
             {/* חיווי מצב סוללה נקי */}
@@ -751,7 +822,11 @@ export default function DriverSearchScreen() {
             </div>
 
             <button type="submit" className="btn" disabled={isBusy} style={{ marginTop: '6px' }}>
-              {isBusy ? 'מאתר ומחשב התאמה...' : 'חשב עמדה אופטימלית'}
+              {isBusy
+                ? 'מאתר ומחשב התאמה...'
+                : isRouteMode
+                  ? 'מצא עצירה משתלמת בדרך'
+                  : 'חשב עמדה אופטימלית'}
             </button>
           </form>
         </div>
