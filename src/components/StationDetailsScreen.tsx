@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { MapPin } from 'lucide-react';
+import { Clock, MapPin } from 'lucide-react';
 import { apiFetch } from '../api/apiClient';
 import { useDriverGps } from '../hooks/useDriverGps';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
@@ -89,7 +89,6 @@ export default function StationDetailsScreen() {
   const stationId = Number(id);
   const navigate = useNavigate();
   const dispatch = useAppDispatch();
-
   const {
     selectedVehicleId,
     currentBatteryPercent,
@@ -293,6 +292,14 @@ export default function StationDetailsScreen() {
         throw new Error('העמדה אינה זמינה לשריון כרגע.');
       }
 
+      if (station.isClosedBySchedule) {
+        throw new Error(
+          station.nextOpenHour != null
+            ? `העמדה סגורה כעת ותיפתח בשעה ${String(station.nextOpenHour).padStart(2, '0')}:00.`
+            : 'העמדה סגורה כעת לפי שעות הפעילות שקבע הבעלים.'
+        );
+      }
+
       if (!isConnectorCompatible) {
         throw new Error(
           `סוג המחבר ברכב (${selectedVehicle.supportedChargerType}) אינו תואם לעמדה (${station.chargerType}).`
@@ -392,8 +399,13 @@ export default function StationDetailsScreen() {
     );
   }
 
+  const isClosedBySchedule = Boolean(station.isClosedBySchedule);
+  const nextOpenLabel =
+    station.nextOpenHour != null ? `${String(station.nextOpenHour).padStart(2, '0')}:00` : null;
+
   const isStationUnavailable =
     !station.isActive ||
+    isClosedBySchedule ||
     station.currentStatus === 'Faulty' ||
     station.currentStatus === 'Occupied' ||
     station.currentStatus === 'Busy';
@@ -424,6 +436,30 @@ export default function StationDetailsScreen() {
           </div>
         }
       />
+
+      {isClosedBySchedule && (
+        <div
+          style={{
+            background: '#FEF2F2',
+            border: '1px solid #FECACA',
+            color: '#991B1B',
+            padding: '12px 16px',
+            borderRadius: '10px',
+            fontSize: '0.88rem',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <Clock size={17} />
+          <span>
+            {nextOpenLabel
+              ? `העמדה סגורה כעת לפי שעות הפעילות של הבעלים · תיפתח בשעה ${nextOpenLabel}`
+              : 'העמדה סגורה כעת לפי שעות הפעילות של הבעלים.'}
+          </span>
+        </div>
+      )}
 
       {hasActiveBooking && (
         <div
@@ -582,7 +618,6 @@ export default function StationDetailsScreen() {
                       onChange={(e) => setCurrentBattery(Number(e.target.value))}
                     />
                   </div>
-
                   <div>
                     <label className="ev-label" htmlFor="details-target-battery">
                       יעד טעינה (%)
@@ -645,7 +680,6 @@ export default function StationDetailsScreen() {
                         </>
                       )}
                     </div>
-
                     <div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--ev-ink-soft)' }}>
                         אנרגיה נדרשת
@@ -657,7 +691,6 @@ export default function StationDetailsScreen() {
                         +{chargingEstimate.neededPercent}% סוללה
                       </div>
                     </div>
-
                     <div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--ev-ink-soft)' }}>
                         זמן טעינה משוער
@@ -669,7 +702,6 @@ export default function StationDetailsScreen() {
                         בהספק {station.maxKw} kW
                       </div>
                     </div>
-
                     <div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--ev-ink-soft)' }}>
                         עלות משוערת
@@ -707,7 +739,6 @@ export default function StationDetailsScreen() {
                   >
                     עדכון נתוני חיפוש
                   </button>
-
                   <button
                     type="submit"
                     className="ev-btn ev-btn-auto"
@@ -723,11 +754,15 @@ export default function StationDetailsScreen() {
                       ? 'משריין עמדה...'
                       : hasActiveBooking
                         ? 'קיימת הזמנה פעילה'
-                        : isStationUnavailable
-                          ? 'העמדה אינה פנויה לשריון'
-                          : distanceKm !== null
-                            ? `שריין עמדה עכשיו (שמירה ל-${eta.totalMinutes} דק׳)`
-                            : 'שריין עמדה עכשיו (שמירה אוטומטית)'}
+                        : isClosedBySchedule
+                          ? nextOpenLabel
+                            ? `סגורה כעת · תיפתח ב-${nextOpenLabel}`
+                            : 'העמדה סגורה כעת לפי לו״ז'
+                          : isStationUnavailable
+                            ? 'העמדה אינה פנויה לשריון'
+                            : distanceKm !== null
+                              ? `שריין עמדה עכשיו (שמירה ל-${eta.totalMinutes} דק׳)`
+                              : 'שריין עמדה עכשיו (שמירה אוטומטית)'}
                   </button>
                 </div>
               </form>

@@ -6,7 +6,7 @@ import { hasUserProfile } from '../store/user/userState';
 import { switchUserRole } from '../store/user/userThunks';
 import PageHeader from './ui/PageHeader';
 import StatCard from './ui/StatCard';
-
+import BlockedHoursBar from './ui/BlockedHoursBar';
 import {
   LayoutDashboard,
   Zap,
@@ -15,6 +15,7 @@ import {
   CalendarDays,
   Star,
   Plus,
+  Clock,
 } from 'lucide-react';
 
 interface UserClaim {
@@ -135,7 +136,6 @@ async function resolveAddressCoords(rawAddress: string): Promise<{ lat: number; 
   // תעדוף תוצאה עם מספר בית מדויק על פני מרכז רחוב
   const best =
     results.find((r) => Boolean(r.address?.house_number || r.class === 'building')) ?? results[0];
-
   const lat = Number(best.lat);
   const lng = Number(best.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
@@ -179,7 +179,6 @@ export default function StationOwnerScreen() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-
   const [activeTab, setActiveTab] = useState<OwnerTab>('stations');
   const [showAddForm, setShowAddForm] = useState<boolean>(false);
 
@@ -194,6 +193,7 @@ export default function StationOwnerScreen() {
   const [chargerType, setChargerType] = useState<'CCS' | 'Type2'>('Type2');
   const [maxKw, setMaxKw] = useState('50');
   const [pricePerKwh, setPricePerKwh] = useState('1.8');
+  const [newBlockedHours, setNewBlockedHours] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
 
   // מונע פתיחה חוזרת של הצעות מיד אחרי בחירה או זיהוי GPS
@@ -207,6 +207,11 @@ export default function StationOwnerScreen() {
   const [editMaxKw, setEditMaxKw] = useState('');
   const [editChargerType, setEditChargerType] = useState<'CCS' | 'Type2'>('Type2');
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // שדות לעריכת שעות השבתה אוטומטיות
+  const [scheduleStationId, setScheduleStationId] = useState<number | null>(null);
+  const [draftBlockedHours, setDraftBlockedHours] = useState<number[]>([]);
+  const [savingHours, setSavingHours] = useState(false);
 
   const loadOwnerData = async () => {
     try {
@@ -225,7 +230,6 @@ export default function StationOwnerScreen() {
       }
 
       setNeedsOwnerSetup(false);
-
       const [dashboardData, bookingsData] = await Promise.all([
         apiFetch<OwnerDashboard>(`/Owner/${ownerIdClaim}/dashboard`),
         apiFetch<ChargeBooking[]>('/ChargeBooking/my-stations'),
@@ -275,7 +279,6 @@ export default function StationOwnerScreen() {
           const data = (await res.json()) as NominatimResult[];
           const seen = new Set<string>();
           const cleaned: CleanSuggestion[] = [];
-
           for (const item of data) {
             const label = formatCleanAddress(item);
             if (!seen.has(label)) {
@@ -289,7 +292,6 @@ export default function StationOwnerScreen() {
             }
             if (cleaned.length >= 5) break;
           }
-
           setSuggestions(cleaned);
           setHoveredSuggestionId(null);
         }
@@ -380,7 +382,6 @@ export default function StationOwnerScreen() {
 
     try {
       setSaving(true);
-
       const coords = addressCoords ?? (await resolveAddressCoords(address));
       if (!coords) {
         throw new Error(
@@ -403,6 +404,7 @@ export default function StationOwnerScreen() {
           maxKw: Number(maxKw),
           pricePerKwh: Number(pricePerKwh),
           isActive: true,
+          blockedHours: newBlockedHours,
         }),
       });
 
@@ -410,6 +412,7 @@ export default function StationOwnerScreen() {
       setAddress('');
       setAddressCoords(null);
       setChargerType('Type2');
+      setNewBlockedHours([]);
       setNeedsOwnerSetup(false);
       setShowAddForm(false);
       setActiveTab('stations');
@@ -436,6 +439,7 @@ export default function StationOwnerScreen() {
   };
 
   const startEditing = (station: Station) => {
+    setScheduleStationId(null);
     setEditingStationId(station.id);
     setEditName(station.name);
     setEditAddress(station.address);
@@ -452,7 +456,6 @@ export default function StationOwnerScreen() {
 
       const trimmedAddress = editAddress.trim() || station.address;
       const resolved = await resolveAddressCoords(trimmedAddress);
-
       if (!resolved && trimmedAddress !== station.address.trim()) {
         throw new Error(
           `לא הצלחנו לאתר את הכתובת "${trimmedAddress}". נסי לרשום רחוב, מספר בית ועיר.`
@@ -470,8 +473,10 @@ export default function StationOwnerScreen() {
           maxKw: Number(editMaxKw),
           pricePerKwh: Number(editPrice),
           isActive: station.isActive,
+          blockedHours: station.blockedHours ?? [],
         }),
       });
+
       setEditingStationId(null);
       setSuccessMessage(`פרטי העמדה "${editName}" עודכנו בהצלחה.`);
       await loadOwnerData();
@@ -479,6 +484,33 @@ export default function StationOwnerScreen() {
       setError(err instanceof Error ? err.message : 'שגיאה בעדכון פרטי העמדה');
     } finally {
       setSavingEdit(false);
+    }
+  };
+
+  const startScheduleEditing = (station: Station) => {
+    setEditingStationId(null);
+    setScheduleStationId(station.id);
+    setDraftBlockedHours(station.blockedHours ?? []);
+  };
+
+  const handleSaveBlockedHours = async (station: Station) => {
+    try {
+      setError(null);
+      setSuccessMessage(null);
+      setSavingHours(true);
+
+      await apiFetch(`/ChargingStations/${station.id}/blocked-hours`, {
+        method: 'PATCH',
+        body: JSON.stringify({ blockedHours: draftBlockedHours }),
+      });
+
+      setScheduleStationId(null);
+      setSuccessMessage(`שעות הפעילות של "${station.name}" נשמרו בהצלחה.`);
+      await loadOwnerData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'שגיאה בשמירת שעות הפעילות');
+    } finally {
+      setSavingHours(false);
     }
   };
 
@@ -533,7 +565,6 @@ export default function StationOwnerScreen() {
               }}
             >
               <Plus size={19} />
-
               {showAddForm
                 ? 'סגור טופס הוספה'
                 : 'הוספת עמדה חדשה'}
@@ -541,6 +572,7 @@ export default function StationOwnerScreen() {
           )
         }
       />
+
       {error && (
         <div className="ev-alert-error" style={{ marginBottom: 0 }}>
           {error}
@@ -564,7 +596,16 @@ export default function StationOwnerScreen() {
       )}
 
       {needsOwnerSetup && !dashboard && (
-        <div className="ev-card" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+        <div
+          className="ev-card"
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '12px',
+          }}
+        >
           <div>
             <h2 style={{ margin: 0, fontSize: '1.08rem', color: 'var(--ev-ink)' }}>
               רוצה להשכיר עמדת טעינה?
@@ -620,6 +661,7 @@ export default function StationOwnerScreen() {
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
+
             <div className="form-group">
               <label>סוג שקע</label>
               <select
@@ -631,6 +673,7 @@ export default function StationOwnerScreen() {
                 <option value="CCS">CCS (טעינה מהירה)</option>
               </select>
             </div>
+
             <div className="form-group">
               <label>הספק (kW)</label>
               <input
@@ -643,6 +686,7 @@ export default function StationOwnerScreen() {
                 onChange={(e) => setMaxKw(e.target.value)}
               />
             </div>
+
             <div className="form-group">
               <label>מחיר לקוט&quot;ש (₪)</label>
               <input
@@ -738,9 +782,21 @@ export default function StationOwnerScreen() {
                 </ul>
               )}
             </div>
+
+            <div
+              style={{
+                gridColumn: '1 / -1',
+                padding: '12px 14px',
+                background: 'var(--ev-bg)',
+                borderRadius: '10px',
+                border: '1px solid var(--ev-border)',
+              }}
+            >
+              <BlockedHoursBar value={newBlockedHours} onChange={setNewBlockedHours} />
+            </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '14px' }}>
             <button type="submit" className="ev-btn ev-btn-auto" disabled={saving}>
               {saving ? 'מאתר כתובת ושומר...' : 'שמור עמדה חדשה'}
             </button>
@@ -765,28 +821,24 @@ export default function StationOwnerScreen() {
               icon={Zap}
               tone="orange"
             />
-
             <StatCard
               title="עמדות פעילות"
               value={dashboard.activeStationsCount}
               icon={CircleCheck}
               tone="green"
             />
-
             <StatCard
               title="עמדות תקולות"
               value={dashboard.faultyStationsCount}
               icon={TriangleAlert}
               tone="red"
             />
-
             <StatCard
               title="סה״כ הזמנות"
               value={dashboard.totalBookings}
               icon={CalendarDays}
               tone="blue"
             />
-
             <StatCard
               title="דירוג ממוצע"
               value={dashboard.averageRating?.toFixed(1) ?? '—'}
@@ -924,7 +976,7 @@ export default function StationOwnerScreen() {
               <div className="screen-header">
                 <div>
                   <div>העמדות שלי</div>
-                  <p className="ev-subtitle">עדכון תעריף, הספק, כתובת, הפעלה/השבתה וטיפול בתקלות</p>
+                  <p className="ev-subtitle">עדכון תעריף, הספק, כתובת, שעות השבתה אוטומטיות וטיפול בתקלות</p>
                 </div>
               </div>
 
@@ -943,166 +995,245 @@ export default function StationOwnerScreen() {
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  {dashboard.stations.map((station) => (
-                    <div
-                      key={station.id}
-                      style={{
-                        background: 'var(--ev-bg)',
-                        padding: '16px 18px',
-                        borderRadius: '11px',
-                        border:
-                          station.currentStatus === 'Faulty'
-                            ? '1px solid var(--ev-danger-border)'
-                            : '1px solid var(--ev-border)',
-                      }}
-                    >
+                  {dashboard.stations.map((station) => {
+                    const blockedCount = station.blockedHours?.length ?? 0;
+                    const isScheduleOpen = scheduleStationId === station.id;
+
+                    return (
                       <div
+                        key={station.id}
                         style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          flexWrap: 'wrap',
-                          gap: '12px',
+                          background: 'var(--ev-bg)',
+                          padding: '16px 18px',
+                          borderRadius: '11px',
+                          border:
+                            station.currentStatus === 'Faulty'
+                              ? '1px solid var(--ev-danger-border)'
+                              : '1px solid var(--ev-border)',
                         }}
                       >
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--ev-ink)' }}>
-                            {station.name}
-                          </div>
-                          <div
-                            className="tabular-nums"
-                            style={{ fontSize: '0.83rem', color: 'var(--ev-ink-muted)', marginTop: '4px' }}
-                          >
-                            {station.address} · {station.chargerType} · {station.maxKw} kW · ₪
-                            {station.pricePerKwh}/kWh ·{' '}
-                            <span
-                              style={{
-                                fontWeight: 600,
-                                color:
-                                  station.currentStatus === 'Faulty'
-                                    ? 'var(--ev-danger)'
-                                    : station.isActive
-                                      ? 'var(--ev-brand)'
-                                      : 'var(--ev-ink-soft)',
-                              }}
-                            >
-                              {station.currentStatus === 'Faulty'
-                                ? 'תקלה (דווח ע"י נהג)'
-                                : station.isActive
-                                  ? 'פעילה ותקינה'
-                                  : 'מושבתת'}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                          {station.currentStatus === 'Faulty' && (
-                            <button
-                              type="button"
-                              className="ev-btn ev-btn-accent ev-btn-auto"
-                              onClick={() => void handleResolveFault(station.id)}
-                            >
-                              סמן כטופלה (זמינה)
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            className="ev-btn ev-btn-secondary ev-btn-auto"
-                            onClick={() =>
-                              editingStationId === station.id
-                                ? setEditingStationId(null)
-                                : startEditing(station)
-                            }
-                          >
-                            {editingStationId === station.id ? 'ביטול עריכה' : 'ערוך פרטים'}
-                          </button>
-
-                          <button
-                            type="button"
-                            className={`ev-btn ev-btn-auto ${
-                              station.isActive ? 'ev-btn-danger' : ''
-                            }`}
-                            onClick={() => void handleToggleStationStatus(station)}
-                          >
-                            {station.isActive ? 'השבת עמדה' : 'הפעל עמדה'}
-                          </button>
-                        </div>
-                      </div>
-
-                      {editingStationId === station.id && (
                         <div
                           style={{
-                            width: '100%',
-                            marginTop: '14px',
-                            paddingTop: '14px',
-                            borderTop: '1px solid var(--ev-border)',
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))',
-                            gap: '10px',
-                            alignItems: 'end',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: '12px',
                           }}
                         >
-                          <div className="form-group" style={{ marginBottom: 0 }}>
-                            <label>שם</label>
-                            <input
-                              type="text"
-                              className="form-control"
-                              value={editName}
-                              onChange={(e) => setEditName(e.target.value)}
-                            />
-                          </div>
-                          <div className="form-group" style={{ marginBottom: 0 }}>
-                            <label>כתובת</label>
-                            <input
-                              type="text"
-                              className="form-control"
-                              value={editAddress}
-                              onChange={(e) => setEditAddress(e.target.value)}
-                            />
-                          </div>
-                          <div className="form-group" style={{ marginBottom: 0 }}>
-                            <label>מחיר (₪/kWh)</label>
-                            <input
-                              type="number"
-                              step="0.1"
-                              className="form-control tabular-nums"
-                              value={editPrice}
-                              onChange={(e) => setEditPrice(e.target.value)}
-                            />
-                          </div>
-                          <div className="form-group" style={{ marginBottom: 0 }}>
-                            <label>הספק (kW)</label>
-                            <input
-                              type="number"
-                              className="form-control tabular-nums"
-                              value={editMaxKw}
-                              onChange={(e) => setEditMaxKw(e.target.value)}
-                            />
-                          </div>
-                          <div className="form-group" style={{ marginBottom: 0 }}>
-                            <label>סוג שקע</label>
-                            <select
-                              className="form-control"
-                              value={editChargerType}
-                              onChange={(e) => setEditChargerType(e.target.value as 'CCS' | 'Type2')}
+                          <div>
+                            <div
+                              style={{
+                                fontWeight: 700,
+                                fontSize: '1rem',
+                                color: 'var(--ev-ink)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                flexWrap: 'wrap',
+                                gap: '8px',
+                              }}
                             >
-                              <option value="Type2">Type2</option>
-                              <option value="CCS">CCS</option>
-                            </select>
+                              <span>{station.name}</span>
+                              {station.isClosedBySchedule && (
+                                <span
+                                  style={{
+                                    fontSize: '0.74rem',
+                                    fontWeight: 600,
+                                    padding: '2px 8px',
+                                    borderRadius: '6px',
+                                    background: '#FEF2F2',
+                                    color: '#B91C1C',
+                                    border: '1px solid #FECACA',
+                                  }}
+                                >
+                                  {station.nextOpenHour != null
+                                    ? `סגורה לפי לו״ז · תיפתח ב-${String(station.nextOpenHour).padStart(2, '0')}:00`
+                                    : 'סגורה לפי לו״ז'}
+                                </span>
+                              )}
+                            </div>
+                            <div
+                              className="tabular-nums"
+                              style={{ fontSize: '0.83rem', color: 'var(--ev-ink-muted)', marginTop: '4px' }}
+                            >
+                              {station.address} · {station.chargerType} · {station.maxKw} kW · ₪
+                              {station.pricePerKwh}/kWh ·{' '}
+                              <span
+                                style={{
+                                  fontWeight: 600,
+                                  color:
+                                    station.currentStatus === 'Faulty'
+                                      ? 'var(--ev-danger)'
+                                      : station.isActive
+                                        ? 'var(--ev-brand)'
+                                        : 'var(--ev-ink-soft)',
+                                }}
+                              >
+                                {station.currentStatus === 'Faulty'
+                                  ? 'תקלה (דווח ע"י נהג)'
+                                  : station.isActive
+                                    ? 'פעילה ותקינה'
+                                    : 'מושבתת'}
+                              </span>
+                              {blockedCount > 0 && ` · ${blockedCount} שעות חסומות`}
+                            </div>
                           </div>
-                          <button
-                            type="button"
-                            className="ev-btn"
-                            disabled={savingEdit}
-                            onClick={() => void handleSaveEdit(station)}
-                          >
-                            {savingEdit ? 'מעדכן...' : 'שמור שינויים'}
-                          </button>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            {station.currentStatus === 'Faulty' && (
+                              <button
+                                type="button"
+                                className="ev-btn ev-btn-accent ev-btn-auto"
+                                onClick={() => void handleResolveFault(station.id)}
+                              >
+                                סמן כטופלה (זמינה)
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="ev-btn ev-btn-secondary ev-btn-auto"
+                              onClick={() =>
+                                isScheduleOpen ? setScheduleStationId(null) : startScheduleEditing(station)
+                              }
+                            >
+                              <Clock size={15} />
+                              {isScheduleOpen ? 'סגור שעות' : 'שעות פעילות'}
+                            </button>
+                            <button
+                              type="button"
+                              className="ev-btn ev-btn-secondary ev-btn-auto"
+                              onClick={() =>
+                                editingStationId === station.id
+                                  ? setEditingStationId(null)
+                                  : startEditing(station)
+                              }
+                            >
+                              {editingStationId === station.id ? 'ביטול עריכה' : 'ערוך פרטים'}
+                            </button>
+                            <button
+                              type="button"
+                              className={`ev-btn ev-btn-auto ${
+                                station.isActive ? 'ev-btn-danger' : ''
+                              }`}
+                              onClick={() => void handleToggleStationStatus(station)}
+                            >
+                              {station.isActive ? 'השבת עמדה' : 'הפעל עמדה'}
+                            </button>
+                          </div>
                         </div>
-                      )}
-                    </div>
-                  ))}
+
+                        {isScheduleOpen && (
+                          <div
+                            style={{
+                              width: '100%',
+                              marginTop: '14px',
+                              paddingTop: '14px',
+                              borderTop: '1px solid var(--ev-border)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '12px',
+                            }}
+                          >
+                            <BlockedHoursBar
+                              value={draftBlockedHours}
+                              onChange={setDraftBlockedHours}
+                              disabled={savingHours}
+                            />
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                className="ev-btn ev-btn-auto"
+                                disabled={savingHours}
+                                onClick={() => void handleSaveBlockedHours(station)}
+                              >
+                                {savingHours ? 'שומר שעות...' : 'שמור שעות פעילות'}
+                              </button>
+                              <button
+                                type="button"
+                                className="ev-btn ev-btn-secondary ev-btn-auto"
+                                disabled={savingHours}
+                                onClick={() => setScheduleStationId(null)}
+                              >
+                                ביטול
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {editingStationId === station.id && (
+                          <div
+                            style={{
+                              width: '100%',
+                              marginTop: '14px',
+                              paddingTop: '14px',
+                              borderTop: '1px solid var(--ev-border)',
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))',
+                              gap: '10px',
+                              alignItems: 'end',
+                            }}
+                          >
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label>שם</label>
+                              <input
+                                type="text"
+                                className="form-control"
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                              />
+                            </div>
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label>כתובת</label>
+                              <input
+                                type="text"
+                                className="form-control"
+                                value={editAddress}
+                                onChange={(e) => setEditAddress(e.target.value)}
+                              />
+                            </div>
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label>מחיר (₪/kWh)</label>
+                              <input
+                                type="number"
+                                step="0.1"
+                                className="form-control tabular-nums"
+                                value={editPrice}
+                                onChange={(e) => setEditPrice(e.target.value)}
+                              />
+                            </div>
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label>הספק (kW)</label>
+                              <input
+                                type="number"
+                                className="form-control tabular-nums"
+                                value={editMaxKw}
+                                onChange={(e) => setEditMaxKw(e.target.value)}
+                              />
+                            </div>
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                              <label>סוג שקע</label>
+                              <select
+                                className="form-control"
+                                value={editChargerType}
+                                onChange={(e) => setEditChargerType(e.target.value as 'CCS' | 'Type2')}
+                              >
+                                <option value="Type2">Type2</option>
+                                <option value="CCS">CCS</option>
+                              </select>
+                            </div>
+                            <button
+                              type="button"
+                              className="ev-btn"
+                              disabled={savingEdit}
+                              onClick={() => void handleSaveEdit(station)}
+                            >
+                              {savingEdit ? 'מעדכן...' : 'שמור שינויים'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -1128,7 +1259,7 @@ export default function StationOwnerScreen() {
                       width: '100%',
                       borderCollapse: 'collapse',
                       textAlign: 'right',
-                      fontSize: '0.86rem',
+                      fontSize: '0.88rem',
                     }}
                   >
                     <thead>

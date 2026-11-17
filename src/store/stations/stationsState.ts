@@ -9,6 +9,9 @@ export interface Station {
   maxKw: number;
   pricePerKwh: number;
   isActive: boolean;
+  blockedHours?: number[];
+  isClosedBySchedule?: boolean;
+  nextOpenHour?: number | null;
   averageRating: number | null;
   reviewsCount: number;
   currentStatus: string | null;
