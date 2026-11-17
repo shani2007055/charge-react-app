@@ -2,9 +2,8 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiFetch, isTokenExpired, triggerSessionExpired } from '../api/apiClient';
 import { useDriverGps } from '../hooks/useDriverGps';
-import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { useAppSelector } from '../store/hooks';
 import type { DriverCoords, Station } from '../store/stations/stationsState';
-import { fetchStations } from '../store/stations/stationsThunks';
 
 interface ChatMessage {
   role: 'user' | 'ai';
@@ -21,6 +20,24 @@ interface VehicleDto {
   model: string;
   supportedChargerType?: string;
   currentBattery?: number;
+}
+
+interface ArcGisCandidate {
+  address?: string;
+  location?: { x: number; y: number };
+}
+
+interface ArcGisFindResponse {
+  candidates?: ArcGisCandidate[];
+}
+
+interface ArcGisReverseResponse {
+  address?: {
+    Match_addr?: string;
+    ShortLabel?: string;
+    Address?: string;
+    City?: string;
+  };
 }
 
 interface NominatimReverseResponse {
@@ -85,11 +102,6 @@ const QUICK_PROMPTS = [
   'אני יושב לפגישה של שעתיים בתל אביב, מה מומלץ?',
 ];
 
-function toLocalIsoString(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-}
-
 function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const r = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -101,7 +113,7 @@ function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: num
       Math.sin(dLon / 2) *
       Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return Math.round(r * c * 10) / 10;
+  return r * c;
 }
 
 function estimateReservationWindowMinutes(distanceKm: number | null): number {
@@ -110,12 +122,138 @@ function estimateReservationWindowMinutes(distanceKm: number | null): number {
   return Math.min(30, Math.max(10, travelMinutes + bufferMinutes));
 }
 
+function getStationBookingBlockReason(station: Station): string | null {
+  if (!station.isActive) {
+    return `העמדה "${station.name}" אינה פעילה כרגע.`;
+  }
+
+  if (station.isClosedBySchedule) {
+    const nextOpen =
+      station.nextOpenHour !== null && station.nextOpenHour !== undefined
+        ? ` ותיפתח בשעה ${String(station.nextOpenHour).padStart(2, '0')}:00`
+        : '';
+    return `העמדה "${station.name}" סגורה כעת לפי שעות הפעילות${nextOpen}.`;
+  }
+
+  const rawStatus = (station.currentStatus ?? '').trim();
+  const normalized = rawStatus.toLowerCase();
+  if (
+    normalized === 'faulty' ||
+    normalized.includes('תקול') ||
+    normalized.includes('fault') ||
+    normalized.includes('broken')
+  ) {
+    return `בעמדה "${station.name}" דווחה תקלה כרגע.`;
+  }
+
+  if (
+    normalized === 'occupied' ||
+    normalized === 'busy' ||
+    normalized.includes('תפוס')
+  ) {
+    return `העמדה "${station.name}" תפוסה כרגע.`;
+  }
+
+  if (
+    normalized === 'reserved' ||
+    normalized.includes('משוריינ') ||
+    normalized.includes('שמור')
+  ) {
+    return `העמדה "${station.name}" משוריינת כבר כרגע.`;
+  }
+
+  return null;
+}
+
+async function geocodeIsraelAddress(query: string): Promise<{ coords: DriverCoords; label: string } | null> {
+  // ניסיון 1: ArcGIS (מדויק לכתובות ישראליות עם מספר בית)
+  try {
+    const arcRes = await fetch(
+      `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?SingleLine=${encodeURIComponent(
+        query
+      )}&countryCode=ISR&langCode=he&outFields=Match_addr,StAddr,City&maxLocations=1&f=json`
+    );
+    if (arcRes.ok) {
+      const arcData = (await arcRes.json()) as ArcGisFindResponse;
+      const best = arcData.candidates?.[0];
+      if (best?.location && Number.isFinite(best.location.y) && Number.isFinite(best.location.x)) {
+        return {
+          coords: { lat: best.location.y, lng: best.location.x },
+          label: best.address?.trim() || query,
+        };
+      }
+    }
+  } catch {
+    // ממשיכים לגיבוי Nominatim
+  }
+
+  // ניסיון 2: Nominatim כגיבוי
+  const nomRes = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=json&countrycodes=il&accept-language=he&limit=1&q=${encodeURIComponent(
+      query
+    )}`
+  );
+  if (!nomRes.ok) {
+    throw new Error('שגיאה באיתור הכתובת');
+  }
+  const results = (await nomRes.json()) as NominatimSearchResult[];
+  if (results.length === 0) return null;
+
+  const lat = Number(results[0].lat);
+  const lng = Number(results[0].lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+
+  return {
+    coords: { lat, lng },
+    label: results[0].display_name || query,
+  };
+}
+
+async function reverseGeocodeIsrael(lat: number, lng: number): Promise<string | null> {
+  try {
+    const arcRes = await fetch(
+      `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/reverseGeocode?location=${lng},${lat}&langCode=he&f=json`
+    );
+    if (arcRes.ok) {
+      const data = (await arcRes.json()) as ArcGisReverseResponse;
+      const short =
+        data.address?.ShortLabel ||
+        [data.address?.Address, data.address?.City].filter(Boolean).join(', ') ||
+        data.address?.Match_addr;
+      if (short) return short;
+    }
+  } catch {
+    // ממשיכים לגיבוי
+  }
+
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=he`
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as NominatimReverseResponse;
+    const cityName =
+      data.address?.city ||
+      data.address?.town ||
+      data.address?.village ||
+      data.address?.municipality ||
+      '';
+    const road = data.address?.road
+      ? `${data.address.road}${data.address.house_number ? ` ${data.address.house_number}` : ''}`
+      : '';
+    const shortAddress = [road, cityName].filter(Boolean).join(', ');
+    return shortAddress || data.display_name || null;
+  } catch {
+    return null;
+  }
+}
+
 function parseAgentMessage(raw: string): { cleanText: string; stations: RecommendedAction[] } {
   const stations: RecommendedAction[] = [];
   const seenIds = new Set<number>();
   const regex = /\[\[STATION:(\d+):([^\]]+)\]\]/g;
-  let match: RegExpExecArray | null = regex.exec(raw);
 
+  let match: RegExpExecArray | null = regex.exec(raw);
   while (match !== null) {
     const id = Number(match[1]);
     const name = match[2].trim();
@@ -136,7 +274,6 @@ function parseAgentMessage(raw: string): { cleanText: string; stations: Recommen
 
 export default function VoiceAgentWidget() {
   const navigate = useNavigate();
-  const dispatch = useAppDispatch();
   const { role, carModel } = useAppSelector((state) => state.user);
   const { currentBatteryPercent, targetBatteryPercent, selectedVehicleId } = useAppSelector(
     (state) => state.stations
@@ -157,7 +294,6 @@ export default function VoiceAgentWidget() {
     function openAssistant() {
       setIsOpen(true);
     }
-
     window.addEventListener('smart-ev:open-assistant', openAssistant);
     return () => {
       window.removeEventListener('smart-ev:open-assistant', openAssistant);
@@ -191,7 +327,7 @@ export default function VoiceAgentWidget() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isOpen]);
+  }, [messages, isOpen, isStreaming]);
 
   useEffect(() => {
     return () => {
@@ -209,27 +345,9 @@ export default function VoiceAgentWidget() {
 
     let cancelled = false;
     const fetchReverseAddress = async () => {
-      try {
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${driverLocation.lat}&lon=${driverLocation.lng}&accept-language=he`
-        );
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as NominatimReverseResponse;
-        const cityName =
-          data.address?.city ||
-          data.address?.town ||
-          data.address?.village ||
-          data.address?.municipality ||
-          '';
-        const road = data.address?.road
-          ? `${data.address.road}${data.address.house_number ? ` ${data.address.house_number}` : ''}`
-          : '';
-        const shortAddress = [road, cityName].filter(Boolean).join(', ');
-        if (!cancelled) {
-          setDetectedAddress(shortAddress || data.display_name || null);
-        }
-      } catch {
-        // במקרה של תקלה בתרגום כתובת נציג קואורדינטות
+      const address = await reverseGeocodeIsrael(driverLocation.lat, driverLocation.lng);
+      if (!cancelled && address) {
+        setDetectedAddress(address);
       }
     };
 
@@ -279,10 +397,17 @@ export default function VoiceAgentWidget() {
     setErrorMessage(null);
     setHasActiveBookingError(false);
     setReservingStationId(stationId);
+
     try {
       const station = await apiFetch<Station>(`/ChargingStations/${stationId}`);
+      const blockReason = getStationBookingBlockReason(station);
+      if (blockReason) {
+        setErrorMessage(blockReason);
+        return;
+      }
 
       let vehicles = await apiFetch<VehicleDto[]>('/UsersVehicles/my');
+
       if (vehicles.length === 0) {
         const created = await apiFetch<VehicleDto>('/UsersVehicles', {
           method: 'POST',
@@ -296,14 +421,20 @@ export default function VoiceAgentWidget() {
         vehicles = [created];
       }
 
+      const targetCharger = station.chargerType.trim().toLowerCase();
+      const compatibleVehicles = vehicles.filter(
+        (v) => (v.supportedChargerType ?? '').trim().toLowerCase() === targetCharger
+      );
+
+      if (compatibleVehicles.length === 0) {
+        setErrorMessage(
+          `לאף אחד מהרכבים שלך אין שקע תואם (${station.chargerType}) לעמדה "${station.name}". ניתן לעדכן רכב במסך הפרופיל.`
+        );
+        return;
+      }
+
       const selectedVehicle =
-        vehicles.find((v) => v.id === selectedVehicleId) ??
-        vehicles.find(
-          (v) =>
-            v.supportedChargerType?.trim().toLowerCase() ===
-            station.chargerType.trim().toLowerCase()
-        ) ??
-        vehicles[0];
+        compatibleVehicles.find((v) => v.id === selectedVehicleId) ?? compatibleVehicles[0];
 
       const distanceKm = driverLocation
         ? calculateDistanceKm(
@@ -315,18 +446,21 @@ export default function VoiceAgentWidget() {
         : null;
       const holdMinutes = estimateReservationWindowMinutes(distanceKm);
 
-      const currentBattery = Math.min(currentBatteryPercent, 95);
-      const targetBattery = Math.max(targetBatteryPercent, currentBattery + 1);
-      const arrivalTime = toLocalIsoString(new Date(Date.now() + holdMinutes * 60 * 1000));
+      const safeCurrentBattery = Math.max(0, Math.min(Math.round(currentBatteryPercent), 95));
+      const safeTargetBattery = Math.min(
+        100,
+        Math.max(Math.round(targetBatteryPercent), safeCurrentBattery + 1)
+      );
+      const arrivalTimeUtc = new Date(Date.now() + holdMinutes * 60 * 1000).toISOString();
 
       await apiFetch('/ChargeBooking', {
         method: 'POST',
         body: JSON.stringify({
           stationId: station.id,
           vehicleId: selectedVehicle.id,
-          currentBatteryPercent: currentBattery,
-          targetBatteryPercent: targetBattery,
-          estimatedArrivalTime: arrivalTime,
+          currentBatteryPercent: safeCurrentBattery,
+          targetBatteryPercent: safeTargetBattery,
+          estimatedArrivalTime: arrivalTimeUtc,
         }),
       });
 
@@ -347,10 +481,9 @@ export default function VoiceAgentWidget() {
     }
   };
 
-  const handleOpenMapResults = async () => {
-    await dispatch(fetchStations());
+  const handleOpenStationDetails = (stationId: number) => {
     setIsOpen(false);
-    navigate('/results');
+    navigate(`/stations/${stationId}`);
   };
 
   const sendMessageToAgent = async (
@@ -386,8 +519,17 @@ export default function VoiceAgentWidget() {
       const coords = overrideLocation ? overrideLocation.coords : await resolveCurrentCoords();
       const addressLabel = overrideLocation ? overrideLocation.address : detectedAddress;
       const isRecheck = Boolean(overrideLocation);
+
       const promptWithLocationContext = coords
-        ? `${trimmed}\n[נתוני מערכת: מיקום הנהג ${isRecheck ? 'עודכן כעת ל-' : 'הנוכחי הוא '}latitude=${coords.lat.toFixed(6)}, longitude=${coords.lng.toFixed(6)}${addressLabel ? ` (${addressLabel})` : ''}. ${isRecheck ? 'הנהג עדכן את מיקומו — התעלם מהמרחקים הקודמים והפעל מיד את FindBestStationsAsync עם הקואורדינטות החדשות האלו!' : 'אם לא צוינה כתובת אחרת בהודעה, השתמש מיד בקואורדינטות אלו ב-FindBestStationsAsync'} (אם הנהג מבקש "הכי קרוב" או ממהר, תן משקל weightDistance=0.85) וב-CalculateDistanceKm.]`
+        ? `${trimmed}\n[נתוני מערכת: מיקום הנהג ${
+            isRecheck ? 'עודכן כעת ל-' : 'הנוכחי הוא '
+          }latitude=${coords.lat.toFixed(6)}, longitude=${coords.lng.toFixed(6)}${
+            addressLabel ? ` (${addressLabel})` : ''
+          }. ${
+            isRecheck
+              ? 'הנהג עדכן את מיקומו — התעלם מהמרחקים הקודמים והפעל מיד את FindBestStationsAsync עם הקואורדינטות החדשות האלו!'
+              : 'אם לא צוינה כתובת אחרת בהודעה, השתמש מיד בקואורדינטות אלו ב-FindBestStationsAsync'
+          } (אם הנהג מבקש "הכי קרוב" או ממהר, תן משקל weightDistance=0.85 וציין chargerType לפי הצורך).]`
         : trimmed;
 
       const historyForServer: ChatMessage[] = [
@@ -422,6 +564,7 @@ export default function VoiceAgentWidget() {
         } catch {
           // נשאר טקסט רגיל
         }
+
         if (
           response.status === 429 ||
           response.status >= 500 ||
@@ -459,10 +602,18 @@ export default function VoiceAgentWidget() {
               if (!dataStr || dataStr === '[DONE]') {
                 continue;
               }
+
               try {
-                const parsed = JSON.parse(dataStr) as { text?: string; title?: string };
+                const parsed = JSON.parse(dataStr) as {
+                  text?: string;
+                  title?: string;
+                  detail?: string;
+                  message?: string;
+                };
                 if (eventType === 'error') {
-                  throw new Error(parsed.title || 'התשובה נקטעה באמצע, נסי שוב.');
+                  throw new Error(
+                    parsed.detail || parsed.message || parsed.title || 'התשובה נקטעה באמצע, נסי שוב.'
+                  );
                 }
                 if (parsed.text) {
                   receivedAnyText = true;
@@ -517,35 +668,27 @@ export default function VoiceAgentWidget() {
     e.preventDefault();
     const trimmed = manualAddressInput.trim();
     if (!trimmed || resolvingManual) return;
+
     setResolvingManual(true);
     setErrorMessage(null);
+
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&countrycodes=il&limit=1&q=${encodeURIComponent(trimmed)}`
-      );
-      if (!res.ok) {
-        throw new Error('שגיאה באיתור הכתובת');
-      }
-      const results = (await res.json()) as NominatimSearchResult[];
-      if (results.length === 0) {
-        setErrorMessage(`לא מצאנו את הכתובת "${trimmed}". נסי לכלול רחוב ועיר.`);
+      const resolved = await geocodeIsraelAddress(trimmed);
+      if (!resolved) {
+        setErrorMessage(`לא מצאנו את הכתובת "${trimmed}". נסי לכלול רחוב, מספר בית ועיר.`);
         return;
       }
-      const coords: DriverCoords = {
-        lat: Number(results[0].lat),
-        lng: Number(results[0].lon),
-      };
-      updateLocation(coords);
+
+      updateLocation(resolved.coords);
       setShareLocation(true);
-      setDetectedAddress(trimmed);
+      setDetectedAddress(resolved.label);
       setManualAddressInput('');
       setShowManualLocation(false);
 
-      // אם כבר הייתה שאלה בצ'אט — שלח מחדש לשרת עם המיקום המעודכן
       if (lastUserQueryRef.current && !isStreaming) {
         void sendMessageToAgent(
-          `עדכנתי מיקום ל־"${trimmed}", בדוק לי מחדש: ${lastUserQueryRef.current}`,
-          { coords, address: trimmed }
+          `עדכנתי מיקום ל־"${resolved.label}", בדוק לי מחדש: ${lastUserQueryRef.current}`,
+          { coords: resolved.coords, address: resolved.label }
         );
       }
     } catch (err) {
@@ -582,6 +725,7 @@ export default function VoiceAgentWidget() {
 
     const w = window as WindowWithSpeech;
     const SpeechRec = w.SpeechRecognition ?? w.webkitSpeechRecognition;
+
     if (!SpeechRec) {
       setErrorMessage('זיהוי דיבור נתמך בדפדפני Chrome / Edge. אפשר גם להקליד רגיל.');
       return;
@@ -651,6 +795,18 @@ export default function VoiceAgentWidget() {
         gap: '10px',
       }}
     >
+      {/* אנימציות מובנות לחוויית חשיבה חלקה */}
+      <style>{`
+        @keyframes evAgentDotBounce {
+          0%, 80%, 100% { transform: translateY(0) scale(0.85); opacity: 0.45; }
+          40% { transform: translateY(-5px) scale(1.1); opacity: 1; }
+        }
+        @keyframes evAgentPulse {
+          0%, 100% { transform: scale(1); opacity: 0.9; }
+          50% { transform: scale(1.08); opacity: 1; }
+        }
+      `}</style>
+
       {isOpen && (
         <div
           className="ev-voice-panel"
@@ -692,6 +848,7 @@ export default function VoiceAgentWidget() {
                   alignItems: 'center',
                   justifyContent: 'center',
                   flexShrink: 0,
+                  animation: isStreaming ? 'evAgentPulse 1.1s infinite ease-in-out' : 'none',
                 }}
               >
                 <svg
@@ -711,11 +868,14 @@ export default function VoiceAgentWidget() {
                 <div style={{ fontWeight: 700, fontSize: '0.95rem', lineHeight: 1.2 }}>
                   העוזר החכם לטעינה
                 </div>
-                <div style={{ fontSize: '0.73rem', color: '#94A3B8', marginTop: '2px' }}>
-                  התאמת עמדות ושריון מהיר בקול או בהקלדה
+                <div style={{ fontSize: '0.73rem', color: isStreaming ? '#FDBA74' : '#94A3B8', marginTop: '2px' }}>
+                  {isStreaming
+                    ? 'מחפש עמדות מתאימות בזמן אמת...'
+                    : 'התאמת עמדות ושריון מהיר בקול או בהקלדה'}
                 </div>
               </div>
             </div>
+
             <button
               type="button"
               onClick={() => setIsOpen(false)}
@@ -814,6 +974,7 @@ export default function VoiceAgentWidget() {
                     {showManualLocation ? 'סגור' : 'תקן כתובת'}
                   </button>
                 )}
+
                 {shareLocation && !locatingGps && (
                   <button
                     type="button"
@@ -833,6 +994,7 @@ export default function VoiceAgentWidget() {
                     רענן GPS
                   </button>
                 )}
+
                 <button
                   type="button"
                   onClick={handleToggleLocationShare}
@@ -861,7 +1023,7 @@ export default function VoiceAgentWidget() {
                   type="text"
                   value={manualAddressInput}
                   onChange={(e) => setManualAddressInput(e.target.value)}
-                  placeholder="הקלידי רחוב ועיר (למשל רוטשילד 50 פתח תקווה)"
+                  placeholder="הקלידי רחוב, מספר בית ועיר (למשל רוטשילד 50 פתח תקווה)"
                   style={{
                     flex: 1,
                     padding: '6px 9px',
@@ -929,6 +1091,8 @@ export default function VoiceAgentWidget() {
               }
 
               const { cleanText, stations } = parseAgentMessage(msg.text);
+              const isThinkingNow = isStreaming && idx === messages.length - 1 && !cleanText;
+
               return (
                 <div
                   key={idx}
@@ -942,17 +1106,63 @@ export default function VoiceAgentWidget() {
                     whiteSpace: 'pre-wrap',
                     textAlign: 'right',
                     background: '#FFFFFF',
-                    border: '1px solid #E2E8F0',
+                    border: isThinkingNow ? '1px solid #FED7AA' : '1px solid #E2E8F0',
                     color: '#0F172A',
                     boxShadow: '0 2px 8px rgba(15, 23, 42, 0.05)',
                   }}
                 >
-                  <div>
-                    {cleanText ||
-                      (isStreaming && idx === messages.length - 1
-                        ? 'חושב ומחפש עמדות מתאימות...'
-                        : '')}
-                  </div>
+                  {isThinkingNow ? (
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        padding: '2px 0',
+                      }}
+                    >
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <span
+                          style={{
+                            width: '7px',
+                            height: '7px',
+                            borderRadius: '50%',
+                            background: '#EA580C',
+                            display: 'inline-block',
+                            animation: 'evAgentDotBounce 1.15s infinite ease-in-out',
+                            animationDelay: '0s',
+                          }}
+                        />
+                        <span
+                          style={{
+                            width: '7px',
+                            height: '7px',
+                            borderRadius: '50%',
+                            background: '#EA580C',
+                            display: 'inline-block',
+                            animation: 'evAgentDotBounce 1.15s infinite ease-in-out',
+                            animationDelay: '0.18s',
+                          }}
+                        />
+                        <span
+                          style={{
+                            width: '7px',
+                            height: '7px',
+                            borderRadius: '50%',
+                            background: '#EA580C',
+                            display: 'inline-block',
+                            animation: 'evAgentDotBounce 1.15s infinite ease-in-out',
+                            animationDelay: '0.36s',
+                          }}
+                        />
+                      </div>
+                      <span style={{ fontSize: '0.82rem', color: '#475569', fontWeight: 500 }}>
+                        מנתח בקשה ובודק עמדות זמינות...
+                      </span>
+                    </div>
+                  ) : (
+                    <div>{cleanText}</div>
+                  )}
+
                   {stations.length > 0 && (
                     <div
                       style={{
@@ -981,12 +1191,12 @@ export default function VoiceAgentWidget() {
                             >
                               {reservingStationId === st.id
                                 ? 'משריין...'
-                                : `שריין את "${st.name}" (שמירה אוטומטית)`}
+                                : `שריין את "${st.name}"`}
                             </button>
                           )}
                           <button
                             type="button"
-                            onClick={() => void handleOpenMapResults()}
+                            onClick={() => handleOpenStationDetails(st.id)}
                             className="ev-btn ev-btn-secondary"
                             style={{
                               width: 'auto',
@@ -994,7 +1204,7 @@ export default function VoiceAgentWidget() {
                               fontSize: '0.78rem',
                             }}
                           >
-                            למפה
+                            לפרטי עמדה
                           </button>
                         </div>
                       ))}
@@ -1129,6 +1339,7 @@ export default function VoiceAgentWidget() {
                 </svg>
               )}
             </button>
+
             <input
               type="text"
               value={inputText}
@@ -1146,6 +1357,7 @@ export default function VoiceAgentWidget() {
                 outline: 'none',
               }}
             />
+
             <button
               type="submit"
               disabled={isStreaming || !inputText.trim()}
@@ -1161,7 +1373,7 @@ export default function VoiceAgentWidget() {
                 flexShrink: 0,
               }}
             >
-              שלח
+              {isStreaming ? 'חושב...' : 'שלח'}
             </button>
           </form>
         </div>
@@ -1196,6 +1408,7 @@ export default function VoiceAgentWidget() {
             strokeWidth="2.3"
             strokeLinecap="round"
             strokeLinejoin="round"
+            style={{ animation: isStreaming ? 'evAgentPulse 1.1s infinite ease-in-out' : 'none' }}
           >
             <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
           </svg>

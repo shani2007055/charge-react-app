@@ -28,6 +28,7 @@ interface ChargeBooking {
 type HistoryFilter = 'all' | 'completed' | 'inactive';
 
 const ACTIVE_STATUSES = ['Held', 'Confirmed', 'Charging'];
+const HOUR_MS = 60 * 60 * 1000;
 
 const BOOKING_STEPS = [
   { id: 'Held', label: 'העמדה שמורה' },
@@ -36,25 +37,46 @@ const BOOKING_STEPS = [
   { id: 'Completed', label: 'סיום ודירוג' },
 ] as const;
 
-function parseSafeArrivalDate(estimatedArrivalTime: string, createdAt: string): Date {
-  const etaMs = new Date(estimatedArrivalTime).getTime();
-  const createdMs = new Date(createdAt).getTime();
-  if (Number.isNaN(etaMs)) return new Date();
+function hasExplicitTimezone(iso: string): boolean {
+  return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(iso.trim());
+}
 
-  // תיקון אוטומטי להזמנות ישנות שנשמרו ב-UTC בזמן ש-createdAt נשמר בשעון מקומי
-  if (!Number.isNaN(createdMs) && etaMs < createdMs - 30 * 60 * 1000) {
-    return new Date(etaMs - new Date().getTimezoneOffset() * 60 * 1000);
+/**
+ * השרת מחזיר זמנים לפי שעון השרת ללא אזור זמן (Z / offset).
+ * לשריון פעיל (שנמשך עד 30 דקות), הפרש חריג מול שעון הדפדפן נובע מהפרש אזור הזמן של השרת.
+ */
+function getServerClockOffsetMs(item: ChargeBooking): number {
+  if (!item.createdAt || hasExplicitTimezone(item.createdAt)) return 0;
+  const createdMs = new Date(item.createdAt).getTime();
+  if (Number.isNaN(createdMs)) return 0;
+
+  const diffMs = Date.now() - createdMs;
+  if (diffMs >= -5 * 60 * 1000 && diffMs <= 45 * 60 * 1000) {
+    return 0;
   }
-  return new Date(etaMs);
+
+  return Math.floor((diffMs + 15 * 60 * 1000) / HOUR_MS) * HOUR_MS;
+}
+
+function parseSafeArrivalDate(item: ChargeBooking): Date {
+  if (!item.estimatedArrivalTime) return new Date();
+  const etaMs = new Date(item.estimatedArrivalTime).getTime();
+  if (Number.isNaN(etaMs)) return new Date();
+  if (hasExplicitTimezone(item.estimatedArrivalTime)) return new Date(etaMs);
+
+  return new Date(etaMs + getServerClockOffsetMs(item));
 }
 
 function getHoldExpirationMs(item: ChargeBooking): number {
+  const offsetMs = getServerClockOffsetMs(item);
   if (item.holdExpiresAt) {
     const parsed = new Date(item.holdExpiresAt).getTime();
-    if (!Number.isNaN(parsed)) return parsed;
+    if (!Number.isNaN(parsed)) {
+      return hasExplicitTimezone(item.holdExpiresAt) ? parsed : parsed + offsetMs;
+    }
   }
   const createdMs = new Date(item.createdAt).getTime();
-  return (Number.isNaN(createdMs) ? Date.now() : createdMs) + 15 * 60 * 1000;
+  return (Number.isNaN(createdMs) ? Date.now() : createdMs + offsetMs) + 15 * 60 * 1000;
 }
 
 function formatHebrewDateTime(value: string): string {
@@ -271,7 +293,7 @@ export default function ActiveSessionScreen() {
   const isExpiringSoon = booking?.status === 'Held' && secondsLeft > 0 && secondsLeft <= 180;
 
   const formattedEta = booking?.estimatedArrivalTime
-    ? parseSafeArrivalDate(booking.estimatedArrivalTime, booking.createdAt).toLocaleTimeString('he-IL', {
+    ? parseSafeArrivalDate(booking).toLocaleTimeString('he-IL', {
         hour: '2-digit',
         minute: '2-digit',
       })

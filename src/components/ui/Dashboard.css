@@ -1,4 +1,3 @@
-
 .dash-page {
   width: 100%;
   max-width: 1700px;
@@ -79,12 +78,30 @@
   background: white;
   border-radius: 18px;
   box-shadow: 0 6px 20px #0f172a06;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: transform 0.2s, box-shadow 0.2s, border-color 0.2s;
 }
 
 .dash-stat:hover {
   transform: translateY(-3px);
   box-shadow: 0 12px 25px #0f172a0d;
+}
+
+.dash-stat-clickable {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: right;
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.dash-stat-clickable:hover {
+  border-color: #cbd5e1;
+}
+
+.dash-stat-clickable:focus-visible {
+  outline: 2px solid #ea580c;
+  outline-offset: 2px;
 }
 
 .dash-stat-icon {

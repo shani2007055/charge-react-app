@@ -1,6 +1,5 @@
-
 import { useEffect, useId, useRef } from 'react';
-import { UserPlus, TriangleAlert, X } from 'lucide-react';
+import { UserPlus, TriangleAlert, CheckCircle2, X } from 'lucide-react';
 import './ConfirmDialog.css';
 
 interface ConfirmDialogProps {
@@ -9,7 +8,7 @@ interface ConfirmDialogProps {
   message: string;
   confirmText?: string;
   cancelText?: string;
-  variant?: 'primary' | 'danger';
+  variant?: 'primary' | 'danger' | 'success';
   loading?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -26,21 +25,16 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel
 }: ConfirmDialogProps) {
-
   const dialogRef = useRef<HTMLDialogElement>(null);
-
   const titleId = useId();
   const messageId = useId();
 
   useEffect(() => {
     const dialog = dialogRef.current;
-
     if (!dialog) return;
-
     if (open && !dialog.open) {
       dialog.showModal();
     }
-
     if (!open && dialog.open) {
       dialog.close();
     }
@@ -49,10 +43,11 @@ export default function ConfirmDialog({
   const Icon =
     variant === 'danger'
       ? TriangleAlert
-      : UserPlus;
+      : variant === 'success'
+        ? CheckCircle2
+        : UserPlus;
 
   return (
-
     <dialog
       ref={dialogRef}
       className={`smart-dialog dialog-${variant}`}
@@ -62,17 +57,13 @@ export default function ConfirmDialog({
       aria-busy={loading}
       onCancel={event => {
         event.preventDefault();
-
         if (!loading) onCancel();
       }}
     >
-
       <div className="smart-dialog-header">
-
         <div className="smart-dialog-icon">
           <Icon size={28} />
         </div>
-
         <button
           type="button"
           className="smart-dialog-close"
@@ -82,15 +73,12 @@ export default function ConfirmDialog({
         >
           <X size={21} />
         </button>
-
       </div>
 
       <h2 id={titleId}>{title}</h2>
-
       <p id={messageId}>{message}</p>
 
       <div className="smart-dialog-actions">
-
         <button
           type="button"
           className="smart-dialog-cancel"
@@ -100,7 +88,6 @@ export default function ConfirmDialog({
         >
           {cancelText}
         </button>
-
         <button
           type="button"
           className="smart-dialog-confirm"
@@ -109,9 +96,7 @@ export default function ConfirmDialog({
         >
           {loading ? 'מבצע פעולה...' : confirmText}
         </button>
-
       </div>
-
     </dialog>
   );
 }

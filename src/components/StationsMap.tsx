@@ -40,6 +40,56 @@ function isValidCoords(lat: number, lng: number): boolean {
   return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 }
 
+function getMapStationAvailability(station: Station): {
+  isUnavailable: boolean;
+  isFaulty: boolean;
+  pinLabel: string;
+  buttonText: string | null;
+} {
+  const status = (station.currentStatus ?? '').trim().toLowerCase();
+  if (!station.isActive || status === 'faulty') {
+    return {
+      isUnavailable: true,
+      isFaulty: true,
+      pinLabel: 'תקלה',
+      buttonText: !station.isActive ? 'מושבתת כרגע' : 'תקולה כרגע',
+    };
+  }
+  if (station.isClosedBySchedule) {
+    const nextOpen =
+      station.nextOpenHour != null ? `${String(station.nextOpenHour).padStart(2, '0')}:00` : null;
+    const text = nextOpen ? `סגורה · תיפתח ב-${nextOpen}` : 'סגורה לפי לו״ז';
+    return {
+      isUnavailable: true,
+      isFaulty: false,
+      pinLabel: 'סגורה',
+      buttonText: text,
+    };
+  }
+  if (status === 'occupied' || status === 'busy') {
+    return {
+      isUnavailable: true,
+      isFaulty: false,
+      pinLabel: 'תפוסה',
+      buttonText: 'תפוסה כרגע',
+    };
+  }
+  if (status === 'reserved') {
+    return {
+      isUnavailable: true,
+      isFaulty: false,
+      pinLabel: 'שמורה',
+      buttonText: 'משוריינת כרגע',
+    };
+  }
+  return {
+    isUnavailable: false,
+    isFaulty: false,
+    pinLabel: `${station.maxKw}kW`,
+    buttonText: null,
+  };
+}
+
 function spreadOverlappingStations(items: MapStationItem[]): Array<{
   item: MapStationItem;
   lat: number;
@@ -253,6 +303,7 @@ export default function StationsMap({
     spreadStations.forEach(({ item, lat, lng }) => {
       const { station, distanceKm, matchPercentage, etaMinutes, isPublic, publicMeta } = item;
       const isSelected = selectedStationId === station.id;
+      const availability = isPublic ? null : getMapStationAvailability(station);
 
       let bgColor: string;
       let label: string;
@@ -262,10 +313,15 @@ export default function StationsMap({
         bgColor = isSelected ? '#0F172A' : '#0284C7';
         label = 'ציבורית';
         badgeClasses += ' public-pin';
+      } else if (availability?.isFaulty) {
+        bgColor = '#DC2626';
+        label = availability.pinLabel;
+      } else if (availability?.isUnavailable) {
+        bgColor = '#64748B';
+        label = availability.pinLabel;
       } else {
-        const isFaulty = !station.isActive || station.currentStatus === 'Faulty';
-        bgColor = isFaulty ? '#DC2626' : isSelected ? '#0F172A' : '#EA580C';
-        label = isFaulty ? 'תקלה' : `${station.maxKw}kW`;
+        bgColor = isSelected ? '#0F172A' : '#EA580C';
+        label = availability?.pinLabel ?? `${station.maxKw}kW`;
       }
 
       if (isSelected) {
@@ -344,7 +400,6 @@ export default function StationsMap({
         );
         popupContainer.appendChild(navRow);
       } else {
-        const isFaulty = !station.isActive || station.currentStatus === 'Faulty';
         const details = document.createElement('div');
         details.style.fontSize = '12px';
         details.style.color = '#0F172A';
@@ -355,33 +410,39 @@ export default function StationsMap({
         details.textContent = `${matchText}${distText}${station.chargerType} · ₪${station.pricePerKwh}`;
         popupContainer.appendChild(details);
 
-        if (!isFaulty) {
-          const reserveBtn = document.createElement('button');
-          reserveBtn.type = 'button';
-          const windowText =
-            distanceKm !== undefined && etaMinutes !== undefined
-              ? `הגעה ~${etaMinutes} דק׳`
-              : 'שמירה אוטומטית';
-          reserveBtn.textContent =
-            reservingId === station.id
-              ? 'משריין...'
+        const reserveBtn = document.createElement('button');
+        reserveBtn.type = 'button';
+        const windowText =
+          distanceKm !== undefined && etaMinutes !== undefined
+            ? `שמירה ל-${etaMinutes} דק׳`
+            : 'שמירה אוטומטית';
+        const isDisabled = Boolean(
+          availability?.isUnavailable || hasActiveBooking || reservingId === station.id
+        );
+
+        reserveBtn.textContent =
+          reservingId === station.id
+            ? 'משריין...'
+            : availability?.isUnavailable && availability.buttonText
+              ? availability.buttonText
               : hasActiveBooking
                 ? 'קיימת הזמנה פעילה'
                 : `שריין עמדה (${windowText})`;
-          reserveBtn.disabled = hasActiveBooking || reservingId === station.id;
-          reserveBtn.style.width = '100%';
-          reserveBtn.style.padding = '8px 12px';
-          reserveBtn.style.border = 'none';
-          reserveBtn.style.borderRadius = '8px';
-          reserveBtn.style.background = hasActiveBooking ? '#94A3B8' : '#0F172A';
-          reserveBtn.style.color = '#FFFFFF';
-          reserveBtn.style.fontWeight = '600';
-          reserveBtn.style.fontSize = '12px';
-          reserveBtn.style.fontFamily = 'Heebo, system-ui, sans-serif';
-          reserveBtn.style.cursor = hasActiveBooking ? 'not-allowed' : 'pointer';
+        reserveBtn.disabled = isDisabled;
+        reserveBtn.style.width = '100%';
+        reserveBtn.style.padding = '8px 12px';
+        reserveBtn.style.border = 'none';
+        reserveBtn.style.borderRadius = '8px';
+        reserveBtn.style.background = isDisabled ? '#94A3B8' : '#0F172A';
+        reserveBtn.style.color = '#FFFFFF';
+        reserveBtn.style.fontWeight = '600';
+        reserveBtn.style.fontSize = '12px';
+        reserveBtn.style.fontFamily = 'Heebo, system-ui, sans-serif';
+        reserveBtn.style.cursor = isDisabled ? 'not-allowed' : 'pointer';
+        if (!isDisabled) {
           reserveBtn.addEventListener('click', () => onReserveRef.current(station, distanceKm));
-          popupContainer.appendChild(reserveBtn);
         }
+        popupContainer.appendChild(reserveBtn);
 
         if (onOpenDetailsRef.current) {
           const detailsBtn = document.createElement('button');

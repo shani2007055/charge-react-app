@@ -1,21 +1,16 @@
-
 .smart-dialog {
   --dialog-accent: #c2410c;
   --dialog-accent-hover: #9a3412;
   --dialog-soft: #fff7ed;
-
   width: min(460px, calc(100% - 32px));
   max-height: calc(100dvh - 32px);
   box-sizing: border-box;
   margin: auto;
   padding: 30px;
-
   background: #ffffff;
   color: #0f172a;
-
   border: 1px solid #e2e8f0;
   border-radius: 24px;
-
   box-shadow: 0 25px 80px #0f172a40;
   font-family: inherit;
   text-align: right;
@@ -26,6 +21,12 @@
   --dialog-accent: #dc2626;
   --dialog-accent-hover: #b91c1c;
   --dialog-soft: #fef2f2;
+}
+
+.smart-dialog.dialog-success {
+  --dialog-accent: #15803d;
+  --dialog-accent-hover: #166534;
+  --dialog-soft: #dcfce7;
 }
 
 .smart-dialog::backdrop {
@@ -50,7 +51,6 @@
   display: grid;
   place-items: center;
   border-radius: 17px;
-
   background: var(--dialog-soft);
   color: var(--dialog-accent);
 }
@@ -59,13 +59,11 @@
   border: 0;
   background: #f1f5f9;
   color: #64748b;
-
   width: 34px;
   height: 34px;
   border-radius: 10px;
   display: grid;
   place-items: center;
-
   cursor: pointer;
 }
 
@@ -136,7 +134,6 @@
     opacity: 0;
     transform: translateY(12px) scale(0.98);
   }
-
   to {
     opacity: 1;
     transform: translateY(0) scale(1);

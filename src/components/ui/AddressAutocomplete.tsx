@@ -1,5 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
-import { searchAddresses, type AddressSuggestion } from '../../utils/geocoding';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  resolveSuggestedAddress,
+  suggestAddresses,
+  type AddressSuggestion,
+  type AutocompleteOption,
+} from '../../utils/geocoding';
 
 interface AddressAutocompleteProps {
   label: string;
@@ -10,11 +15,14 @@ interface AddressAutocompleteProps {
   onClear?: () => void;                                  // כפתור "נקה"
   isSelected?: boolean;                                  // האם כבר נבחרה כתובת (אז לא מחפשים שוב)
   disabled?: boolean;
+  exactOnly?: boolean;                                   // true = מחייב רחוב + עיר (לעמדות טעינה)
+  hint?: string | null;                                  // הודעת עזר מתחת לשדה
+  rightAction?: ReactNode;                               // כפתור נוסף לצד השדה (למשל "זהה מיקום")
 }
 
 /**
- * שדה כתובת עם השלמה אוטומטית:
- * המשתמש מקליד → אחרי 400ms בלי הקלדה (debounce) → חיפוש ב-Nominatim → רשימת הצעות.
+ * שדה כתובת עם השלמה אוטומטית (מבוסס ArcGIS):
+ * המשתמש מקליד → אחרי 350ms בלי הקלדה (debounce) → רשימת הצעות → בבחירה נשלפות קואורדינטות מדויקות.
  */
 export default function AddressAutocomplete({
   label,
@@ -25,10 +33,15 @@ export default function AddressAutocomplete({
   onClear,
   isSelected = false,
   disabled = false,
+  exactOnly = false,
+  hint = null,
+  rightAction,
 }: AddressAutocompleteProps) {
-  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
-  const [hoveredId, setHoveredId] = useState<number | null>(null);
+  const [suggestions, setSuggestions] = useState<AutocompleteOption[]>([]);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [resolving, setResolving] = useState(false);
+  const [noExactMatch, setNoExactMatch] = useState(false);
 
   // מונע פתיחה חוזרת של ההצעות מיד אחרי בחירה
   const skipNextRef = useRef(false);
@@ -42,56 +55,84 @@ export default function AddressAutocomplete({
     const query = value.trim();
     if (query.length < 3 || isSelected) {
       setSuggestions([]);
+      setNoExactMatch(false);
       return;
     }
 
     const controller = new AbortController();
     const timerId = window.setTimeout(async () => {
       setLoading(true);
+      setNoExactMatch(false);
       try {
-        setSuggestions(await searchAddresses(query, controller.signal));
+        const results = await suggestAddresses(
+          query,
+          controller.signal,
+          exactOnly,
+          exactOnly ? 10 : 6
+        );
+        setSuggestions(results);
         setHoveredId(null);
+        if (exactOnly && results.length === 0) {
+          setNoExactMatch(true);
+        }
       } catch (err) {
         if (err instanceof Error && err.name === 'AbortError') return;
         setSuggestions([]);
       } finally {
         setLoading(false);
       }
-    }, 400);
+    }, 350);
 
-    // ניקוי: אם המשתמש הקליד שוב לפני שעברו 400ms – מבטלים את הטיימר ואת הבקשה הקודמת
     return () => {
       window.clearTimeout(timerId);
       controller.abort();
     };
-  }, [value, isSelected]);
+  }, [value, isSelected, exactOnly]);
 
-  const handleSelect = (item: AddressSuggestion) => {
+  const handleSelect = async (item: AutocompleteOption) => {
+    if (resolving) return;
     skipNextRef.current = true;
     setSuggestions([]);
     setHoveredId(null);
-    onSelect(item);
+    setNoExactMatch(false);
+    setResolving(true);
+
+    try {
+      const resolved = await resolveSuggestedAddress(item);
+      onSelect(resolved);
+    } catch {
+      // במקרה של שגיאת רשת רגעית נשאיר את הטקסט לבדיקה ידנית בשמירה
+      onChange(item.label);
+    } finally {
+      setResolving(false);
+    }
   };
 
   return (
-    <div className="form-group" style={{ position: 'relative' }}>
+    <div className="form-group" style={{ position: 'relative', marginBottom: 0 }}>
       <label>{label}</label>
-      <div style={{ display: 'flex', gap: '8px' }}>
+      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
         <input
           type="text"
           className="form-control"
+          style={{ flex: '1 1 220px' }}
           placeholder={placeholder}
           value={value}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled || resolving}
+          onChange={(e) => {
+            setNoExactMatch(false);
+            onChange(e.target.value);
+          }}
         />
+        {rightAction}
         {onClear && value && (
           <button
             type="button"
             className="ev-btn ev-btn-secondary ev-btn-auto"
-            disabled={disabled}
+            disabled={disabled || resolving}
             onClick={() => {
               setSuggestions([]);
+              setNoExactMatch(false);
               onClear();
             }}
           >
@@ -100,9 +141,25 @@ export default function AddressAutocomplete({
         )}
       </div>
 
-      {loading && (
+      {hint && (
+        <div style={{ fontSize: '0.78rem', color: '#B45309', marginTop: '6px' }}>
+          {hint}
+        </div>
+      )}
+
+      {!hint && exactOnly && noExactMatch && !loading && !isSelected && (
+        <div style={{ fontSize: '0.78rem', color: '#B45309', marginTop: '6px' }}>
+          לא נמצאה כתובת רחוב מדויקת — יש להזין רחוב, מספר בית ועיר (למשל: הרב גולדקנופף 3, ירושלים).
+        </div>
+      )}
+
+      {(loading || resolving) && (
         <div style={{ fontSize: '0.78rem', color: 'var(--ev-ink-soft)', marginTop: '6px' }}>
-          מחפש הצעות כתובות...
+          {resolving
+            ? 'מאמת קואורדינטות מדויקות...'
+            : exactOnly
+              ? 'מחפש כתובות מדויקות...'
+              : 'מחפש הצעות כתובות...'}
         </div>
       )}
 
@@ -131,7 +188,7 @@ export default function AddressAutocomplete({
             return (
               <li
                 key={item.id}
-                onClick={() => handleSelect(item)}
+                onClick={() => void handleSelect(item)}
                 onMouseEnter={() => setHoveredId(item.id)}
                 style={{
                   padding: '10px 14px',
@@ -143,9 +200,28 @@ export default function AddressAutocomplete({
                   cursor: 'pointer',
                   borderBottom: '1px solid var(--ev-surface-subtle)',
                   transition: 'background-color 0.15s ease, color 0.15s ease',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: '8px',
                 }}
               >
-                {item.label}
+                <span>{item.label}</span>
+                {exactOnly && !item.hasHouseNumber && (
+                  <span
+                    style={{
+                      fontSize: '0.72rem',
+                      color: '#B45309',
+                      background: '#FFFBEB',
+                      border: '1px solid #FDE68A',
+                      padding: '1px 6px',
+                      borderRadius: '5px',
+                      flexShrink: 0,
+                    }}
+                  >
+                    הוסף מס׳ בית
+                  </span>
+                )}
               </li>
             );
           })}

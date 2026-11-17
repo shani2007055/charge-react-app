@@ -7,6 +7,7 @@ interface StatCardProps {
   icon: LucideIcon;
   tone?: 'orange' | 'green' | 'red' | 'blue';
   description?: string;
+  onClick?: () => void;
 }
 
 export default function StatCard({
@@ -14,10 +15,11 @@ export default function StatCard({
   value,
   icon: Icon,
   tone = 'orange',
-  description
+  description,
+  onClick,
 }: StatCardProps) {
-  return (
-    <article className={`dash-stat tone-${tone}`}>
+  const content = (
+    <>
       <div className="dash-stat-icon">
         <Icon size={24} />
       </div>
@@ -31,6 +33,24 @@ export default function StatCard({
       </strong>
 
       {description && <small>{description}</small>}
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className={`dash-stat dash-stat-clickable tone-${tone}`}
+        onClick={onClick}
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return (
+    <article className={`dash-stat tone-${tone}`}>
+      {content}
     </article>
   );
 }

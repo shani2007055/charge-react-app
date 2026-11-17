@@ -45,11 +45,6 @@ interface BookingStatusOnly {
 
 const ACTIVE_STATUSES = ['Held', 'Confirmed', 'Charging'];
 
-function toLocalIsoString(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-}
-
 function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const r = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -251,6 +246,16 @@ export default function StationDetailsScreen() {
     );
   }, [station, selectedVehicle]);
 
+  const batteryValidationError = useMemo(() => {
+    if (!Number.isFinite(currentBattery) || currentBattery < 0 || currentBattery >= 100) {
+      return 'אחוז הסוללה הנוכחי חייב להיות בין 0% ל-99%.';
+    }
+    if (!Number.isFinite(targetBattery) || targetBattery <= currentBattery || targetBattery > 100) {
+      return 'יעד הטעינה חייב להיות גבוה מהסוללה הנוכחית ועד 100%.';
+    }
+    return null;
+  }, [currentBattery, targetBattery]);
+
   const chargingEstimate = useMemo(() => {
     if (!station) return null;
     const neededPercent = Math.max(0, targetBattery - currentBattery);
@@ -306,15 +311,8 @@ export default function StationDetailsScreen() {
         );
       }
 
-      if (
-        !Number.isFinite(currentBattery) ||
-        !Number.isFinite(targetBattery) ||
-        currentBattery < 0 ||
-        currentBattery >= 100 ||
-        targetBattery <= currentBattery ||
-        targetBattery > 100
-      ) {
-        throw new Error('יש להזין אחוז סוללה נוכחי (0–99%) ויעד טעינה הגבוה ממנו (עד 100%).');
+      if (batteryValidationError) {
+        throw new Error(batteryValidationError);
       }
 
       dispatch(setSelectedVehicle(selectedVehicle.id));
@@ -325,7 +323,8 @@ export default function StationDetailsScreen() {
         })
       );
 
-      const arrivalTime = toLocalIsoString(new Date(Date.now() + eta.totalMinutes * 60 * 1000));
+      // שליחה ב-UTC (עם Z) כדי שהשרת ימיר במדויק לשעון המקומי שלו
+      const arrivalTime = new Date(Date.now() + eta.totalMinutes * 60 * 1000).toISOString();
 
       await apiFetch('/ChargeBooking', {
         method: 'POST',
@@ -356,6 +355,7 @@ export default function StationDetailsScreen() {
     station,
     selectedVehicle,
     isConnectorCompatible,
+    batteryValidationError,
     currentBattery,
     targetBattery,
     eta.totalMinutes,
@@ -408,7 +408,10 @@ export default function StationDetailsScreen() {
     isClosedBySchedule ||
     station.currentStatus === 'Faulty' ||
     station.currentStatus === 'Occupied' ||
+    station.currentStatus === 'Reserved' ||
     station.currentStatus === 'Busy';
+
+  const isCappedHold = eta.travelMinutes + eta.bufferMinutes > 30;
 
   return (
     <div className="dash-page" dir="rtl">
@@ -526,14 +529,8 @@ export default function StationDetailsScreen() {
               השלמת שריון עמדה
             </h2>
             <p style={{ margin: '0 0 18px 0', fontSize: '0.86rem', color: 'var(--ev-ink-muted)' }}>
-              בחרו רכב ואחוזי סוללה כדי לחשב זמן טעינה, עלות משוערת וחלון הגעה אוטומטי לפי מרחק.
+              בחרו רכב ואחוזי סוללה כדי לחשב זמן טעינה, עלות משוערת וחלון שמירה אוטומטי לפי מרחק.
             </p>
-
-            {reserveError && (
-              <div className="ev-alert-error" style={{ marginBottom: '16px' }}>
-                {reserveError}
-              </div>
-            )}
 
             {vehicles.length === 0 ? (
               <div
@@ -574,6 +571,7 @@ export default function StationDetailsScreen() {
                     onChange={(e) => {
                       const nextId = Number(e.target.value);
                       setChosenVehicleId(Number.isFinite(nextId) ? nextId : null);
+                      setReserveError(null);
                     }}
                   >
                     {vehicles.map((v) => (
@@ -597,41 +595,77 @@ export default function StationDetailsScreen() {
                   )}
                 </div>
 
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
-                    gap: '14px',
-                  }}
-                >
-                  <div>
-                    <label className="ev-label" htmlFor="details-current-battery">
-                      סוללה נוכחית (%)
-                    </label>
-                    <input
-                      id="details-current-battery"
-                      type="number"
-                      min={0}
-                      max={99}
-                      className="ev-input tabular-nums"
-                      value={currentBattery}
-                      onChange={(e) => setCurrentBattery(Number(e.target.value))}
-                    />
+                <div>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                      gap: '14px',
+                    }}
+                  >
+                    <div>
+                      <label className="ev-label" htmlFor="details-current-battery">
+                        סוללה נוכחית (%)
+                      </label>
+                      <input
+                        id="details-current-battery"
+                        type="number"
+                        min={0}
+                        max={99}
+                        className="ev-input tabular-nums"
+                        style={{
+                          borderColor:
+                            !Number.isFinite(currentBattery) ||
+                            currentBattery < 0 ||
+                            currentBattery >= 100
+                              ? '#DC2626'
+                              : undefined,
+                        }}
+                        value={currentBattery}
+                        onChange={(e) => {
+                          setCurrentBattery(Number(e.target.value));
+                          setReserveError(null);
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label className="ev-label" htmlFor="details-target-battery">
+                        יעד טעינה (%)
+                      </label>
+                      <input
+                        id="details-target-battery"
+                        type="number"
+                        min={1}
+                        max={100}
+                        className="ev-input tabular-nums"
+                        style={{
+                          borderColor:
+                            !Number.isFinite(targetBattery) ||
+                            targetBattery <= currentBattery ||
+                            targetBattery > 100
+                              ? '#DC2626'
+                              : undefined,
+                        }}
+                        value={targetBattery}
+                        onChange={(e) => {
+                          setTargetBattery(Number(e.target.value));
+                          setReserveError(null);
+                        }}
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label className="ev-label" htmlFor="details-target-battery">
-                      יעד טעינה (%)
-                    </label>
-                    <input
-                      id="details-target-battery"
-                      type="number"
-                      min={1}
-                      max={100}
-                      className="ev-input tabular-nums"
-                      value={targetBattery}
-                      onChange={(e) => setTargetBattery(Number(e.target.value))}
-                    />
-                  </div>
+                  {batteryValidationError && (
+                    <div
+                      style={{
+                        fontSize: '0.8rem',
+                        color: '#B91C1C',
+                        fontWeight: 600,
+                        marginTop: '6px',
+                      }}
+                    >
+                      {batteryValidationError}
+                    </div>
+                  )}
                 </div>
 
                 {/* סיכום אומדנים */}
@@ -657,7 +691,9 @@ export default function StationDetailsScreen() {
                             {eta.totalMinutes} דק׳
                           </strong>
                           <div style={{ fontSize: '0.72rem', color: 'var(--ev-ink-muted)' }}>
-                            אוטומטי ({distanceKm} ק&quot;מ: ~{eta.travelMinutes} + {eta.bufferMinutes} מרווח)
+                            {isCappedHold
+                              ? `אוטומטי (${distanceKm} ק"מ · הגעה ~${eta.travelMinutes} דק׳ · מקסימום שמירה 30 דק׳)`
+                              : `אוטומטי (${distanceKm} ק"מ: ~${eta.travelMinutes} + ${eta.bufferMinutes} מרווח)`}
                           </div>
                         </>
                       ) : (
@@ -722,6 +758,12 @@ export default function StationDetailsScreen() {
                   </div>
                 )}
 
+                {reserveError && (
+                  <div className="ev-alert-error" style={{ marginBottom: 0 }}>
+                    {reserveError}
+                  </div>
+                )}
+
                 <div
                   style={{
                     display: 'flex',
@@ -747,7 +789,8 @@ export default function StationDetailsScreen() {
                       reserving ||
                       hasActiveBooking ||
                       isStationUnavailable ||
-                      !isConnectorCompatible
+                      !isConnectorCompatible ||
+                      Boolean(batteryValidationError)
                     }
                   >
                     {reserving

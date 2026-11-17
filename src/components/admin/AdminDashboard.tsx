@@ -24,6 +24,7 @@ import {
   XCircle,
   MapPin,
   Clock,
+  Eye,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -51,6 +52,8 @@ import {
 import './AdminDashboard.css';
 
 const PAGE_SIZE = 12;
+
+type StationTableFilter = 'all' | 'pending' | 'faulty';
 
 const navigation: {
   id: AdminPage;
@@ -109,6 +112,7 @@ type CellValue = string | number | boolean | null;
 type TableRow = {
   id: number;
   cells: CellValue[];
+  searchText?: string;
 };
 
 interface TableData {
@@ -124,7 +128,7 @@ interface PendingAdminAction {
   message: string;
   confirmText: string;
   successMessage: string;
-  variant?: 'primary' | 'danger';
+  variant?: 'primary' | 'danger' | 'success';
   run: () => Promise<void>;
 }
 
@@ -133,6 +137,16 @@ function formatDate(value: string) {
   return Number.isNaN(date.getTime())
     ? '—'
     : date.toLocaleString('he-IL');
+}
+
+function formatBlockedHours(hours?: number[]): string {
+  if (!hours || hours.length === 0) {
+    return 'ללא שעות חסומות (פתוחה 24/7)';
+  }
+  return [...hours]
+    .sort((a, b) => a - b)
+    .map((h) => `${String(h).padStart(2, '0')}:00`)
+    .join(', ');
 }
 
 function getApprovalMeta(status?: string | null): {
@@ -210,12 +224,14 @@ function getTable(
     case 'stations':
       return {
         headers: [
-          'מזהה', 'שם עמדה', 'כתובת',
-          'בעלים', 'מחבר', 'הספק',
-          'מחיר לקוט״ש', 'דירוג', 'מצב תפעולי', 'אישור מנהל',
+          'מזהה',
+          'שם עמדה',
+          'כתובת',
+          'מצב תפעולי',
+          'אישור מנהל',
         ],
-        statusColumn: 8,
-        approvalColumn: 9,
+        statusColumn: 3,
+        approvalColumn: 4,
         hasActions: true,
         rows: data.stations.map((s) => ({
           id: s.id,
@@ -223,14 +239,23 @@ function getTable(
             s.id,
             s.name,
             s.address,
-            s.ownerName ? `${s.ownerName} (#${s.ownerId})` : `#${s.ownerId}`,
-            s.chargerType,
-            `${s.maxKw} kW`,
-            `₪${s.pricePerKwh.toFixed(2)}`,
-            s.averageRating?.toFixed(1) ?? '—',
             s.isActive ? s.currentStatus : 'Inactive',
             s.approvalStatus ?? 'Approved',
           ],
+          searchText: [
+            s.id,
+            s.name,
+            s.address,
+            s.ownerName ?? '',
+            s.ownerEmail ?? '',
+            s.ownerPhone ?? '',
+            s.chargerType,
+            `${s.maxKw} kW`,
+            s.pricePerKwh,
+            s.approvalStatus ?? 'Approved',
+          ]
+            .join(' ')
+            .toLowerCase(),
         })),
       };
     case 'vehicles':
@@ -323,11 +348,17 @@ export default function AdminDashboard() {
   const [search, setSearch] = useState('');
   const [pageNumber, setPageNumber] = useState(1);
   const [onlyFaults, setOnlyFaults] = useState(false);
+  const [stationFilter, setStationFilter] = useState<StationTableFilter>('all');
+  const [onlyActiveBookings, setOnlyActiveBookings] = useState(false);
   const [pendingAction, setPendingAction] =
     useState<PendingAdminAction | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+
+  // דיאלוג פרטי עמדה מלאים
+  const detailsDialogRef = useRef<HTMLDialogElement>(null);
+  const [detailsStation, setDetailsStation] = useState<Station | null>(null);
 
   // דיאלוג דחיית עמדה עם סיבה
   const rejectDialogRef = useRef<HTMLDialogElement>(null);
@@ -335,6 +366,17 @@ export default function AdminDashboard() {
   const [rejectReason, setRejectReason] = useState('');
   const [rejectValidationError, setRejectValidationError] = useState<string | null>(null);
   const [rejectLoading, setRejectLoading] = useState(false);
+
+  useEffect(() => {
+    const dialog = detailsDialogRef.current;
+    if (!dialog) return;
+    if (detailsStation && !dialog.open) {
+      dialog.showModal();
+    }
+    if (!detailsStation && dialog.open) {
+      dialog.close();
+    }
+  }, [detailsStation]);
 
   useEffect(() => {
     const dialog = rejectDialogRef.current;
@@ -388,12 +430,24 @@ export default function AdminDashboard() {
         const statusValue = String(row.cells[2] ?? '').toLowerCase();
         if (statusValue !== 'faulty') return false;
       }
+      if (page === 'stations' && stationFilter !== 'all') {
+        if (stationFilter === 'pending') {
+          if (String(row.cells[4] ?? '') !== 'Pending') return false;
+        } else if (stationFilter === 'faulty') {
+          if (String(row.cells[3] ?? '').toLowerCase() !== 'faulty') return false;
+        }
+      }
+      if (page === 'bookings' && onlyActiveBookings) {
+        const statusValue = String(row.cells[6] ?? '').toLowerCase();
+        if (!['held', 'confirmed', 'charging'].includes(statusValue)) return false;
+      }
       if (!query) return true;
+      if (row.searchText && row.searchText.includes(query)) return true;
       return row.cells.some((cell) =>
         String(cell ?? '').toLowerCase().includes(query)
       );
     });
-  }, [table.rows, search, page, onlyFaults]);
+  }, [table.rows, search, page, onlyFaults, stationFilter, onlyActiveBookings]);
 
   const pageCount = Math.max(
     1,
@@ -449,11 +503,20 @@ export default function AdminDashboard() {
     return value;
   }
 
-  function changePage(nextPage: AdminPage) {
+  function changePage(
+    nextPage: AdminPage,
+    options?: {
+      onlyFaults?: boolean;
+      stationFilter?: StationTableFilter;
+      onlyActiveBookings?: boolean;
+    }
+  ) {
     setPage(nextPage);
     setSearch('');
     setPageNumber(1);
-    setOnlyFaults(false);
+    setOnlyFaults(options?.onlyFaults ?? false);
+    setStationFilter(options?.stationFilter ?? 'all');
+    setOnlyActiveBookings(options?.onlyActiveBookings ?? false);
     setActionError(null);
     setActionSuccess(null);
   }
@@ -471,7 +534,7 @@ export default function AdminDashboard() {
       title: 'אישור עמדת טעינה',
       message: `האם לאשר את העמדה "${station.name}" (${station.address}) להצגה עבור כלל הנהגים?`,
       confirmText: 'אשר עמדה',
-      variant: 'primary',
+      variant: 'success',
       successMessage: `העמדה "${station.name}" אושרה בהצלחה ותופיע מעכשיו לנהגים.`,
       run: async () => {
         await reviewAdminStation(station.id, { approvalStatus: 'Approved' });
@@ -616,16 +679,14 @@ export default function AdminDashboard() {
       if (!station) return null;
       return (
         <div className="admin-actions-cell">
-          <a
-            href={getMapsUrl(station.latitude, station.longitude)}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
             className="admin-action-btn"
-            style={{ textDecoration: 'none' }}
+            onClick={() => setDetailsStation(station)}
           >
-            <MapPin size={14} />
-            מפה
-          </a>
+            <Eye size={14} />
+            פרטים
+          </button>
           {station.approvalStatus !== 'Approved' && (
             <button
               type="button"
@@ -797,54 +858,63 @@ export default function AdminDashboard() {
                 value={metricValue('stations', pendingStations.length)}
                 icon={Clock}
                 tone={pendingStations.length > 0 ? 'orange' : 'green'}
+                onClick={() => changePage('stations', { stationFilter: 'pending' })}
               />
               <StatCard
                 title="משתמשים"
                 value={metricValue('users', data.users.length)}
                 icon={Users}
                 tone="blue"
+                onClick={() => changePage('users')}
               />
               <StatCard
                 title="נהגים"
                 value={metricValue('drivers', data.drivers.length)}
                 icon={CarFront}
                 tone="green"
+                onClick={() => changePage('drivers')}
               />
               <StatCard
                 title="בעלי תחנות"
                 value={metricValue('owners', activeOwners.length)}
                 icon={Building2}
                 tone="blue"
+                onClick={() => changePage('owners')}
               />
               <StatCard
                 title="עמדות טעינה"
                 value={metricValue('stations', data.stations.length)}
                 icon={Zap}
                 tone="orange"
+                onClick={() => changePage('stations')}
               />
               <StatCard
                 title="הזמנות פעילות"
                 value={metricValue('bookings', activeBookings)}
                 icon={CalendarDays}
                 tone="green"
+                onClick={() => changePage('bookings', { onlyActiveBookings: true })}
               />
               <StatCard
                 title="עמדות תקולות"
                 value={metricValue('stations', faultyStations)}
                 icon={TriangleAlert}
                 tone="red"
+                onClick={() => changePage('stations', { stationFilter: 'faulty' })}
               />
               <StatCard
                 title="רכבים רשומים"
                 value={metricValue('vehicles', data.vehicles.length)}
                 icon={Car}
                 tone="blue"
+                onClick={() => changePage('vehicles')}
               />
               <StatCard
                 title="ביקורות"
                 value={metricValue('reviews', data.reviews.length)}
                 icon={Star}
                 tone="orange"
+                onClick={() => changePage('reviews')}
               />
             </div>
 
@@ -976,6 +1046,70 @@ export default function AdminDashboard() {
                 />
               </div>
 
+              {page === 'stations' && (
+                <div className="admin-actions-cell">
+                  <button
+                    type="button"
+                    className="admin-action-btn"
+                    style={
+                      stationFilter === 'all'
+                        ? { background: '#0f172a', color: '#fff', borderColor: '#0f172a' }
+                        : undefined
+                    }
+                    onClick={() => {
+                      setStationFilter('all');
+                      setPageNumber(1);
+                    }}
+                  >
+                    הכל
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-action-btn"
+                    style={
+                      stationFilter === 'pending'
+                        ? { background: '#ea580c', color: '#fff', borderColor: '#ea580c' }
+                        : undefined
+                    }
+                    onClick={() => {
+                      setStationFilter('pending');
+                      setPageNumber(1);
+                    }}
+                  >
+                    ממתינות לאישור ({pendingStations.length})
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-action-btn"
+                    style={
+                      stationFilter === 'faulty'
+                        ? { background: '#dc2626', color: '#fff', borderColor: '#dc2626' }
+                        : undefined
+                    }
+                    onClick={() => {
+                      setStationFilter('faulty');
+                      setPageNumber(1);
+                    }}
+                  >
+                    תקולות ({faultyStations})
+                  </button>
+                </div>
+              )}
+
+              {page === 'bookings' && (
+                <label className="admin-filter">
+                  <input
+                    type="checkbox"
+                    checked={onlyActiveBookings}
+                    onChange={(event) => {
+                      setOnlyActiveBookings(event.target.checked);
+                      setPageNumber(1);
+                    }}
+                  />
+                  הזמנות פעילות בלבד
+                </label>
+              )}
+
               {page === 'logs' && (
                 <label className="admin-filter">
                   <input
@@ -1089,6 +1223,219 @@ export default function AdminDashboard() {
           if (!actionLoading) setPendingAction(null);
         }}
       />
+
+      <dialog
+        ref={detailsDialogRef}
+        className="smart-dialog"
+        style={{ width: 'min(620px, calc(100% - 32px))' }}
+        dir="rtl"
+        onCancel={(event) => {
+          event.preventDefault();
+          setDetailsStation(null);
+        }}
+      >
+        {detailsStation && (() => {
+          const approvalMeta = getApprovalMeta(detailsStation.approvalStatus);
+          return (
+            <>
+              <div className="smart-dialog-header">
+                <div className="smart-dialog-icon">
+                  <Zap size={26} />
+                </div>
+                <button
+                  type="button"
+                  className="smart-dialog-close"
+                  aria-label="סגירה"
+                  onClick={() => setDetailsStation(null)}
+                >
+                  <X size={21} />
+                </button>
+              </div>
+
+              <h2 style={{ marginBottom: '6px' }}>
+                {detailsStation.name}{' '}
+                <span style={{ fontSize: '15px', color: '#64748b', fontWeight: 600 }}>
+                  (#{detailsStation.id})
+                </span>
+              </h2>
+
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  flexWrap: 'wrap',
+                  marginBottom: '18px',
+                }}
+              >
+                <StatusBadge
+                  status={detailsStation.isActive ? detailsStation.currentStatus : 'Inactive'}
+                />
+                <span className={`dash-status tone-${approvalMeta.tone}`}>
+                  <span className="dash-status-dot" />
+                  {approvalMeta.label}
+                </span>
+              </div>
+
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                  gap: '12px',
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '14px',
+                  padding: '16px',
+                  fontSize: '13.5px',
+                }}
+              >
+                <div>
+                  <div style={{ color: '#64748b', fontSize: '12px' }}>כתובת</div>
+                  <div style={{ fontWeight: 600, color: '#0f172a' }}>{detailsStation.address}</div>
+                </div>
+                <div>
+                  <div style={{ color: '#64748b', fontSize: '12px' }}>בעלים</div>
+                  <div style={{ fontWeight: 600, color: '#0f172a' }}>
+                    {detailsStation.ownerName
+                      ? `${detailsStation.ownerName} (#${detailsStation.ownerId})`
+                      : `בעלים #${detailsStation.ownerId}`}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: '#64748b', fontSize: '12px' }}>דוא״ל בעלים</div>
+                  <div style={{ fontWeight: 600, color: '#0f172a', overflowWrap: 'anywhere' }}>
+                    {detailsStation.ownerEmail || '—'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: '#64748b', fontSize: '12px' }}>טלפון בעלים</div>
+                  <div style={{ fontWeight: 600, color: '#0f172a' }}>
+                    {detailsStation.ownerPhone || '—'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: '#64748b', fontSize: '12px' }}>סוג מחבר והספק</div>
+                  <div style={{ fontWeight: 600, color: '#0f172a' }}>
+                    {detailsStation.chargerType} · {detailsStation.maxKw} kW
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: '#64748b', fontSize: '12px' }}>מחיר לקוט״ש</div>
+                  <div style={{ fontWeight: 600, color: '#0f172a' }}>
+                    ₪{detailsStation.pricePerKwh.toFixed(2)}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: '#64748b', fontSize: '12px' }}>דירוג</div>
+                  <div style={{ fontWeight: 600, color: '#0f172a' }}>
+                    {detailsStation.averageRating != null
+                      ? `${detailsStation.averageRating.toFixed(1)} (${detailsStation.reviewsCount} ביקורות)`
+                      : 'טרם דורגה'}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: '#64748b', fontSize: '12px' }}>קואורדינטות</div>
+                  <div className="font-mono-num" style={{ fontWeight: 600, color: '#0f172a' }}>
+                    {detailsStation.latitude.toFixed(5)}, {detailsStation.longitude.toFixed(5)}
+                  </div>
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div style={{ color: '#64748b', fontSize: '12px' }}>שעות השבתה קבועות</div>
+                  <div style={{ fontWeight: 600, color: '#0f172a' }}>
+                    {formatBlockedHours(detailsStation.blockedHours)}
+                  </div>
+                </div>
+              </div>
+
+              {detailsStation.approvalStatus === 'Rejected' && detailsStation.rejectionReason && (
+                <div
+                  style={{
+                    marginTop: '12px',
+                    padding: '10px 14px',
+                    borderRadius: '10px',
+                    background: '#fef2f2',
+                    border: '1px solid #fecaca',
+                    color: '#991b1b',
+                    fontSize: '13px',
+                  }}
+                >
+                  <strong>סיבת הדחייה:</strong> {detailsStation.rejectionReason}
+                </div>
+              )}
+
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                  paddingTop: '18px',
+                  marginTop: '18px',
+                  borderTop: '1px solid #e2e8f0',
+                }}
+              >
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <a
+                    href={getMapsUrl(detailsStation.latitude, detailsStation.longitude)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="admin-action-btn"
+                    style={{ textDecoration: 'none', padding: '8px 14px' }}
+                  >
+                    <MapPin size={15} />
+                    פתח ב-Google Maps
+                  </a>
+                  {detailsStation.approvalStatus !== 'Approved' && (
+                    <button
+                      type="button"
+                      className="admin-action-btn"
+                      style={{
+                        borderColor: '#86efac',
+                        background: '#f0fdf4',
+                        color: '#166534',
+                        padding: '8px 14px',
+                      }}
+                      onClick={() => {
+                        const target = detailsStation;
+                        setDetailsStation(null);
+                        requestApproveStation(target);
+                      }}
+                    >
+                      <CheckCircle2 size={15} />
+                      אשר עמדה
+                    </button>
+                  )}
+                  {detailsStation.approvalStatus !== 'Rejected' && (
+                    <button
+                      type="button"
+                      className="admin-action-btn danger"
+                      style={{ padding: '8px 14px' }}
+                      onClick={() => {
+                        const target = detailsStation;
+                        setDetailsStation(null);
+                        openRejectDialog(target);
+                      }}
+                    >
+                      <XCircle size={15} />
+                      דחה עמדה
+                    </button>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  className="smart-dialog-cancel"
+                  style={{ minHeight: '40px', padding: '8px 18px', borderRadius: '10px', cursor: 'pointer', fontWeight: 700 }}
+                  onClick={() => setDetailsStation(null)}
+                >
+                  סגור
+                </button>
+              </div>
+            </>
+          );
+        })()}
+      </dialog>
 
       <dialog
         ref={rejectDialogRef}

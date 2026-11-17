@@ -45,6 +45,23 @@ const subtleLabelStyle = {
   color: '#64748B',
 } as const;
 
+const fieldErrorStyle = {
+  fontSize: '0.78rem',
+  color: '#B91C1C',
+  fontWeight: 600,
+  marginTop: '4px',
+} as const;
+
+const successBannerStyle = {
+  background: '#F0FDF4',
+  border: '1px solid #BBF7D0',
+  color: '#15803D',
+  padding: '10px 14px',
+  borderRadius: '10px',
+  fontSize: '0.86rem',
+  marginBottom: '12px',
+} as const;
+
 const eyeButtonStyle = {
   position: 'absolute' as const,
   right: '10px',
@@ -111,14 +128,16 @@ export default function UserProfileScreen() {
   const [profile, setProfile] = useState<UserProfileDto | null>(null);
   const [vehicles, setVehicles] = useState<VehicleDto[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // עריכת פרטי משתמש
   const [isEditingProfile, setIsEditingProfile] = useState<boolean>(false);
   const [editName, setEditName] = useState<string>('');
   const [editPhone, setEditPhone] = useState<string>('');
   const [savingProfile, setSavingProfile] = useState<boolean>(false);
+  const [profileFieldErrors, setProfileFieldErrors] = useState<{ name?: string; phone?: string }>({});
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [profileSuccess, setProfileSuccess] = useState<string | null>(null);
 
   // שינוי סיסמה
   const [showChangePassword, setShowChangePassword] = useState<boolean>(false);
@@ -129,6 +148,13 @@ export default function UserProfileScreen() {
   const [showNewPw, setShowNewPw] = useState<boolean>(false);
   const [showConfirmNewPw, setShowConfirmNewPw] = useState<boolean>(false);
   const [savingPassword, setSavingPassword] = useState<boolean>(false);
+  const [passwordFieldErrors, setPasswordFieldErrors] = useState<{
+    current?: string;
+    newPw?: string;
+    confirm?: string;
+  }>({});
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
 
   // הוספת רכב חדש
   const [showAddVehicle, setShowAddVehicle] = useState<boolean>(false);
@@ -136,6 +162,11 @@ export default function UserProfileScreen() {
   const [newCapacityKwh, setNewCapacityKwh] = useState<string>('60');
   const [newChargerType, setNewChargerType] = useState<ChargerType>('Type2');
   const [savingNewVehicle, setSavingNewVehicle] = useState<boolean>(false);
+  const [addVehicleFieldErrors, setAddVehicleFieldErrors] = useState<{
+    model?: string;
+    capacity?: string;
+  }>({});
+  const [addVehicleError, setAddVehicleError] = useState<string | null>(null);
 
   // עריכת רכב קיים
   const [editingVehicleId, setEditingVehicleId] = useState<number | null>(null);
@@ -143,6 +174,15 @@ export default function UserProfileScreen() {
   const [editCapacityKwh, setEditCapacityKwh] = useState<string>('');
   const [editChargerType, setEditChargerType] = useState<ChargerType>('Type2');
   const [savingVehicleEdit, setSavingVehicleEdit] = useState<boolean>(false);
+  const [editVehicleFieldErrors, setEditVehicleFieldErrors] = useState<{
+    model?: string;
+    capacity?: string;
+  }>({});
+  const [vehicleActionError, setVehicleActionError] = useState<{
+    vehicleId: number;
+    message: string;
+  } | null>(null);
+  const [vehiclesSuccess, setVehiclesSuccess] = useState<string | null>(null);
 
   // אישור מחיקת רכב בלי window.confirm
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
@@ -157,7 +197,7 @@ export default function UserProfileScreen() {
 
     const loadProfileData = async () => {
       setLoading(true);
-      setError(null);
+      setLoadError(null);
 
       try {
         const claims = await apiFetch<UserClaim[]>('/users/me');
@@ -198,7 +238,7 @@ export default function UserProfileScreen() {
         }
       } catch (err) {
         if (!active) return;
-        setError(err instanceof Error ? err.message : 'שגיאה בטעינת הפרופיל');
+        setLoadError(err instanceof Error ? err.message : 'שגיאה בטעינת הפרופיל');
       } finally {
         if (active) {
           setLoading(false);
@@ -218,21 +258,24 @@ export default function UserProfileScreen() {
 
     const trimmedName = editName.trim();
     const trimmedPhone = editPhone.trim();
+    const nextFieldErrors: { name?: string; phone?: string } = {};
 
     if (trimmedName.length < 2 || trimmedName.length > 60) {
-      setError('השם חייב להכיל בין 2 ל-60 תווים.');
-      return;
+      nextFieldErrors.name = 'השם חייב להכיל בין 2 ל-60 תווים.';
+    }
+    if (!ISRAELI_PHONE_REGEX.test(trimmedPhone)) {
+      nextFieldErrors.phone = 'מספר טלפון חייב להיות בפורמט ישראלי תקין (למשל 050-1234567).';
     }
 
-    if (!ISRAELI_PHONE_REGEX.test(trimmedPhone)) {
-      setError('מספר טלפון חייב להיות בפורמט ישראלי תקין (למשל 050-1234567).');
+    setProfileFieldErrors(nextFieldErrors);
+    setProfileError(null);
+    setProfileSuccess(null);
+
+    if (Object.keys(nextFieldErrors).length > 0) {
       return;
     }
 
     setSavingProfile(true);
-    setError(null);
-    setSuccessMessage(null);
-
     try {
       const updated = await apiFetch<UserProfileDto>(`/users/${profile.id}`, {
         method: 'PUT',
@@ -245,9 +288,9 @@ export default function UserProfileScreen() {
       setProfile(updated);
       dispatch(updateUserName(updated.name));
       setIsEditingProfile(false);
-      setSuccessMessage('הפרטים האישיים עודכנו בהצלחה!');
+      setProfileSuccess('הפרטים האישיים עודכנו בהצלחה!');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה בעדכון הפרופיל');
+      setProfileError(err instanceof Error ? err.message : 'שגיאה בעדכון הפרופיל');
     } finally {
       setSavingProfile(false);
     }
@@ -255,23 +298,30 @@ export default function UserProfileScreen() {
 
   const handleChangePassword = async (e: FormEvent) => {
     e.preventDefault();
-    setError(null);
-    setSuccessMessage(null);
+    setPasswordError(null);
+    setPasswordSuccess(null);
 
-    if (!currentPassword || !newPassword || !confirmNewPassword) {
-      setError('יש למלא את כל שדות הסיסמה.');
-      return;
+    const nextFieldErrors: { current?: string; newPw?: string; confirm?: string } = {};
+
+    if (!currentPassword) {
+      nextFieldErrors.current = 'יש להזין את הסיסמה הנוכחית.';
     }
-    if (!PASSWORD_RULE.test(newPassword)) {
-      setError('הסיסמה החדשה חייבת להכיל לפחות 8 תווים, אות באנגלית ומספר.');
-      return;
+    if (!newPassword) {
+      nextFieldErrors.newPw = 'יש להזין סיסמה חדשה.';
+    } else if (!PASSWORD_RULE.test(newPassword)) {
+      nextFieldErrors.newPw = 'הסיסמה החדשה חייבת להכיל לפחות 8 תווים, אות באנגלית ומספר.';
+    } else if (currentPassword && currentPassword === newPassword) {
+      nextFieldErrors.newPw = 'הסיסמה החדשה חייבת להיות שונה מהסיסמה הנוכחית.';
     }
-    if (newPassword !== confirmNewPassword) {
-      setError('הסיסמה החדשה ואימות הסיסמה אינם תואמים.');
-      return;
+
+    if (!confirmNewPassword) {
+      nextFieldErrors.confirm = 'יש לאמת את הסיסמה החדשה.';
+    } else if (newPassword && newPassword !== confirmNewPassword) {
+      nextFieldErrors.confirm = 'הסיסמה החדשה ואימות הסיסמה אינם תואמים.';
     }
-    if (currentPassword === newPassword) {
-      setError('הסיסמה החדשה חייבת להיות שונה מהסיסמה הנוכחית.');
+
+    setPasswordFieldErrors(nextFieldErrors);
+    if (Object.keys(nextFieldErrors).length > 0) {
       return;
     }
 
@@ -293,9 +343,10 @@ export default function UserProfileScreen() {
       setShowNewPw(false);
       setShowConfirmNewPw(false);
       setShowChangePassword(false);
-      setSuccessMessage('הסיסמה עודכנה בהצלחה!');
+      setPasswordFieldErrors({});
+      setPasswordSuccess('הסיסמה עודכנה בהצלחה!');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה בשינוי הסיסמה');
+      setPasswordError(err instanceof Error ? err.message : 'שגיאה בשינוי הסיסמה');
     } finally {
       setSavingPassword(false);
     }
@@ -305,20 +356,24 @@ export default function UserProfileScreen() {
     e.preventDefault();
     const trimmedModel = newModel.trim();
     const capacity = Number(newCapacityKwh);
+    const nextFieldErrors: { model?: string; capacity?: string } = {};
 
     if (trimmedModel.length < 2) {
-      setError('דגם הרכב חייב להכיל לפחות 2 תווים.');
-      return;
+      nextFieldErrors.model = 'דגם הרכב חייב להכיל לפחות 2 תווים.';
     }
     if (Number.isNaN(capacity) || capacity < 1 || capacity > 300) {
-      setError('קיבולת הסוללה חייבת להיות בין 1 ל-300 קוט"ש.');
+      nextFieldErrors.capacity = 'קיבולת הסוללה חייבת להיות בין 1 ל-300 קוט"ש.';
+    }
+
+    setAddVehicleFieldErrors(nextFieldErrors);
+    setAddVehicleError(null);
+    setVehiclesSuccess(null);
+
+    if (Object.keys(nextFieldErrors).length > 0) {
       return;
     }
 
     setSavingNewVehicle(true);
-    setError(null);
-    setSuccessMessage(null);
-
     try {
       const created = await apiFetch<VehicleDto>('/UsersVehicles', {
         method: 'POST',
@@ -336,9 +391,10 @@ export default function UserProfileScreen() {
       setNewCapacityKwh('60');
       setNewChargerType('Type2');
       setShowAddVehicle(false);
-      setSuccessMessage(`הרכב "${created.model}" נוסף בהצלחה!`);
+      setAddVehicleFieldErrors({});
+      setVehiclesSuccess(`הרכב "${created.model}" נוסף בהצלחה!`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה בהוספת הרכב');
+      setAddVehicleError(err instanceof Error ? err.message : 'שגיאה בהוספת הרכב');
     } finally {
       setSavingNewVehicle(false);
     }
@@ -349,29 +405,34 @@ export default function UserProfileScreen() {
     setEditModel(vehicle.model);
     setEditCapacityKwh(String(vehicle.batteryCapacityKwh));
     setEditChargerType(vehicle.supportedChargerType === 'CCS' ? 'CCS' : 'Type2');
-    setError(null);
-    setSuccessMessage(null);
+    setEditVehicleFieldErrors({});
+    setVehicleActionError(null);
+    setVehiclesSuccess(null);
   };
 
   const handleSaveVehicleEdit = async (e: FormEvent, vehicleId: number) => {
     e.preventDefault();
     const trimmedModel = editModel.trim();
     const capacity = Number(editCapacityKwh);
+    const nextFieldErrors: { model?: string; capacity?: string } = {};
 
     if (trimmedModel.length < 2) {
-      setError('דגם הרכב חייב להכיל לפחות 2 תווים.');
-      return;
+      nextFieldErrors.model = 'דגם הרכב חייב להכיל לפחות 2 תווים.';
     }
     if (Number.isNaN(capacity) || capacity < 1 || capacity > 300) {
-      setError('קיבולת הסוללה חייבת להיות בין 1 ל-300 קוט"ש.');
+      nextFieldErrors.capacity = 'קיבולת הסוללה חייבת להיות בין 1 ל-300 קוט"ש.';
+    }
+
+    setEditVehicleFieldErrors(nextFieldErrors);
+    setVehicleActionError(null);
+    setVehiclesSuccess(null);
+
+    if (Object.keys(nextFieldErrors).length > 0) {
       return;
     }
 
     const existingVehicle = vehicles.find((v) => v.id === vehicleId);
-
     setSavingVehicleEdit(true);
-    setError(null);
-    setSuccessMessage(null);
 
     try {
       const updated = await apiFetch<VehicleDto>(`/UsersVehicles/${vehicleId}`, {
@@ -396,9 +457,13 @@ export default function UserProfileScreen() {
       }
 
       setEditingVehicleId(null);
-      setSuccessMessage('פרטי הרכב עודכנו בהצלחה!');
+      setEditVehicleFieldErrors({});
+      setVehiclesSuccess('פרטי הרכב עודכנו בהצלחה!');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה בעדכון הרכב');
+      setVehicleActionError({
+        vehicleId,
+        message: err instanceof Error ? err.message : 'שגיאה בעדכון הרכב',
+      });
     } finally {
       setSavingVehicleEdit(false);
     }
@@ -406,8 +471,8 @@ export default function UserProfileScreen() {
 
   const handleDeleteVehicle = async (vehicleId: number) => {
     setDeletingId(vehicleId);
-    setError(null);
-    setSuccessMessage(null);
+    setVehicleActionError(null);
+    setVehiclesSuccess(null);
 
     try {
       await apiFetch<string>(`/UsersVehicles/${vehicleId}`, {
@@ -419,9 +484,12 @@ export default function UserProfileScreen() {
         syncSelectedVehicle(remaining[0] ?? null);
       }
       setConfirmDeleteId(null);
-      setSuccessMessage('הרכב הוסר מהרשימה.');
+      setVehiclesSuccess('הרכב הוסר מהרשימה.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה במחיקת הרכב');
+      setVehicleActionError({
+        vehicleId,
+        message: err instanceof Error ? err.message : 'שגיאה במחיקת הרכב',
+      });
     } finally {
       setDeletingId(null);
     }
@@ -452,25 +520,9 @@ export default function UserProfileScreen() {
           </div>
         )}
 
-        {error && (
+        {loadError && (
           <div className="ev-alert-error" style={{ marginBottom: '16px' }}>
-            {error}
-          </div>
-        )}
-
-        {successMessage && (
-          <div
-            style={{
-              background: '#F0FDF4',
-              border: '1px solid #BBF7D0',
-              color: '#15803D',
-              padding: '11px 14px',
-              borderRadius: '10px',
-              fontSize: '0.88rem',
-              marginBottom: '16px',
-            }}
-          >
-            {successMessage}
+            {loadError}
           </div>
         )}
 
@@ -509,14 +561,17 @@ export default function UserProfileScreen() {
                       setEditName(profile.name);
                       setEditPhone(profile.phone);
                       setIsEditingProfile(true);
-                      setError(null);
-                      setSuccessMessage(null);
+                      setProfileFieldErrors({});
+                      setProfileError(null);
+                      setProfileSuccess(null);
                     }}
                   >
                     ערוך פרטים
                   </button>
                 )}
               </div>
+
+              {profileSuccess && <div style={successBannerStyle}>{profileSuccess}</div>}
 
               {!isEditingProfile ? (
                 <div
@@ -570,28 +625,53 @@ export default function UserProfileScreen() {
                   </div>
                 </div>
               ) : (
-                <form onSubmit={handleSaveProfile} style={{ display: 'grid', gap: '12px' }}>
+                <form onSubmit={handleSaveProfile} noValidate style={{ display: 'grid', gap: '12px' }}>
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label style={subtleLabelStyle}>שם מלא</label>
                     <input
                       type="text"
                       className="form-control"
+                      style={{ borderColor: profileFieldErrors.name ? '#DC2626' : undefined }}
                       value={editName}
-                      onChange={(e) => setEditName(e.target.value)}
+                      onChange={(e) => {
+                        setEditName(e.target.value);
+                        if (profileFieldErrors.name) {
+                          setProfileFieldErrors((prev) => ({ ...prev, name: undefined }));
+                        }
+                      }}
                       required
                     />
+                    {profileFieldErrors.name && (
+                      <div style={fieldErrorStyle}>{profileFieldErrors.name}</div>
+                    )}
                   </div>
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label style={subtleLabelStyle}>טלפון</label>
                     <input
                       type="text"
                       className="form-control tabular-nums"
+                      style={{ borderColor: profileFieldErrors.phone ? '#DC2626' : undefined }}
                       value={editPhone}
-                      onChange={(e) => setEditPhone(e.target.value)}
+                      onChange={(e) => {
+                        setEditPhone(e.target.value);
+                        if (profileFieldErrors.phone) {
+                          setProfileFieldErrors((prev) => ({ ...prev, phone: undefined }));
+                        }
+                      }}
                       placeholder="050-1234567"
                       required
                     />
+                    {profileFieldErrors.phone && (
+                      <div style={fieldErrorStyle}>{profileFieldErrors.phone}</div>
+                    )}
                   </div>
+
+                  {profileError && (
+                    <div className="ev-alert-error" style={{ marginBottom: 0 }}>
+                      {profileError}
+                    </div>
+                  )}
+
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     <button
                       type="submit"
@@ -603,7 +683,11 @@ export default function UserProfileScreen() {
                     <button
                       type="button"
                       className="ev-btn ev-btn-secondary ev-btn-auto"
-                      onClick={() => setIsEditingProfile(false)}
+                      onClick={() => {
+                        setIsEditingProfile(false);
+                        setProfileFieldErrors({});
+                        setProfileError(null);
+                      }}
                     >
                       ביטול
                     </button>
@@ -621,7 +705,7 @@ export default function UserProfileScreen() {
                   alignItems: 'center',
                   gap: '12px',
                   flexWrap: 'wrap',
-                  marginBottom: showChangePassword ? '16px' : 0,
+                  marginBottom: showChangePassword || passwordSuccess ? '16px' : 0,
                 }}
               >
                 <div>
@@ -639,17 +723,21 @@ export default function UserProfileScreen() {
                   style={{ padding: '8px 14px', fontSize: '0.86rem' }}
                   onClick={() => {
                     setShowChangePassword((prev) => !prev);
-                    setError(null);
-                    setSuccessMessage(null);
+                    setPasswordFieldErrors({});
+                    setPasswordError(null);
+                    setPasswordSuccess(null);
                   }}
                 >
                   {showChangePassword ? 'סגור' : 'שינוי סיסמה'}
                 </button>
               </div>
 
+              {passwordSuccess && <div style={successBannerStyle}>{passwordSuccess}</div>}
+
               {showChangePassword && (
                 <form
                   onSubmit={handleChangePassword}
+                  noValidate
                   style={{
                     background: '#F8FAFC',
                     padding: '16px',
@@ -667,9 +755,18 @@ export default function UserProfileScreen() {
                         autoComplete="current-password"
                         className="form-control"
                         value={currentPassword}
-                        onChange={(e) => setCurrentPassword(e.target.value)}
+                        onChange={(e) => {
+                          setCurrentPassword(e.target.value);
+                          if (passwordFieldErrors.current) {
+                            setPasswordFieldErrors((prev) => ({ ...prev, current: undefined }));
+                          }
+                        }}
                         dir="ltr"
-                        style={{ textAlign: 'left', paddingRight: '38px' }}
+                        style={{
+                          textAlign: 'left',
+                          paddingRight: '38px',
+                          borderColor: passwordFieldErrors.current ? '#DC2626' : undefined,
+                        }}
                         required
                       />
                       <button
@@ -681,6 +778,9 @@ export default function UserProfileScreen() {
                         <EyeIcon open={showCurrentPw} />
                       </button>
                     </div>
+                    {passwordFieldErrors.current && (
+                      <div style={fieldErrorStyle}>{passwordFieldErrors.current}</div>
+                    )}
                   </div>
 
                   <div
@@ -700,9 +800,18 @@ export default function UserProfileScreen() {
                           autoComplete="new-password"
                           className="form-control"
                           value={newPassword}
-                          onChange={(e) => setNewPassword(e.target.value)}
+                          onChange={(e) => {
+                            setNewPassword(e.target.value);
+                            if (passwordFieldErrors.newPw) {
+                              setPasswordFieldErrors((prev) => ({ ...prev, newPw: undefined }));
+                            }
+                          }}
                           dir="ltr"
-                          style={{ textAlign: 'left', paddingRight: '38px' }}
+                          style={{
+                            textAlign: 'left',
+                            paddingRight: '38px',
+                            borderColor: passwordFieldErrors.newPw ? '#DC2626' : undefined,
+                          }}
                           required
                         />
                         <button
@@ -714,6 +823,9 @@ export default function UserProfileScreen() {
                           <EyeIcon open={showNewPw} />
                         </button>
                       </div>
+                      {passwordFieldErrors.newPw && (
+                        <div style={fieldErrorStyle}>{passwordFieldErrors.newPw}</div>
+                      )}
                     </div>
 
                     <div className="form-group" style={{ marginBottom: 0 }}>
@@ -724,9 +836,18 @@ export default function UserProfileScreen() {
                           autoComplete="new-password"
                           className="form-control"
                           value={confirmNewPassword}
-                          onChange={(e) => setConfirmNewPassword(e.target.value)}
+                          onChange={(e) => {
+                            setConfirmNewPassword(e.target.value);
+                            if (passwordFieldErrors.confirm) {
+                              setPasswordFieldErrors((prev) => ({ ...prev, confirm: undefined }));
+                            }
+                          }}
                           dir="ltr"
-                          style={{ textAlign: 'left', paddingRight: '38px' }}
+                          style={{
+                            textAlign: 'left',
+                            paddingRight: '38px',
+                            borderColor: passwordFieldErrors.confirm ? '#DC2626' : undefined,
+                          }}
                           required
                         />
                         <button
@@ -738,8 +859,17 @@ export default function UserProfileScreen() {
                           <EyeIcon open={showConfirmNewPw} />
                         </button>
                       </div>
+                      {passwordFieldErrors.confirm && (
+                        <div style={fieldErrorStyle}>{passwordFieldErrors.confirm}</div>
+                      )}
                     </div>
                   </div>
+
+                  {passwordError && (
+                    <div className="ev-alert-error" style={{ marginBottom: 0 }}>
+                      {passwordError}
+                    </div>
+                  )}
 
                   <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                     <button
@@ -757,6 +887,8 @@ export default function UserProfileScreen() {
                         setCurrentPassword('');
                         setNewPassword('');
                         setConfirmNewPassword('');
+                        setPasswordFieldErrors({});
+                        setPasswordError(null);
                       }}
                     >
                       ביטול
@@ -788,17 +920,21 @@ export default function UserProfileScreen() {
                     style={{ padding: '8px 14px', fontSize: '0.86rem' }}
                     onClick={() => {
                       setShowAddVehicle((prev) => !prev);
-                      setError(null);
-                      setSuccessMessage(null);
+                      setAddVehicleFieldErrors({});
+                      setAddVehicleError(null);
+                      setVehiclesSuccess(null);
                     }}
                   >
                     {showAddVehicle ? 'סגור טופס' : '+ הוסף רכב'}
                   </button>
                 </div>
 
+                {vehiclesSuccess && <div style={successBannerStyle}>{vehiclesSuccess}</div>}
+
                 {showAddVehicle && (
                   <form
                     onSubmit={handleAddVehicle}
+                    noValidate
                     style={{
                       background: '#F8FAFC',
                       padding: '16px',
@@ -814,11 +950,20 @@ export default function UserProfileScreen() {
                       <input
                         type="text"
                         className="form-control"
+                        style={{ borderColor: addVehicleFieldErrors.model ? '#DC2626' : undefined }}
                         placeholder="למשל Tesla Model 3 / BYD Atto 3"
                         value={newModel}
-                        onChange={(e) => setNewModel(e.target.value)}
+                        onChange={(e) => {
+                          setNewModel(e.target.value);
+                          if (addVehicleFieldErrors.model) {
+                            setAddVehicleFieldErrors((prev) => ({ ...prev, model: undefined }));
+                          }
+                        }}
                         required
                       />
+                      {addVehicleFieldErrors.model && (
+                        <div style={fieldErrorStyle}>{addVehicleFieldErrors.model}</div>
+                      )}
                     </div>
                     <div
                       style={{
@@ -843,14 +988,35 @@ export default function UserProfileScreen() {
                         <input
                           type="number"
                           className="form-control tabular-nums"
+                          style={{
+                            borderColor: addVehicleFieldErrors.capacity ? '#DC2626' : undefined,
+                          }}
                           min={1}
                           max={300}
                           value={newCapacityKwh}
-                          onChange={(e) => setNewCapacityKwh(e.target.value)}
+                          onChange={(e) => {
+                            setNewCapacityKwh(e.target.value);
+                            if (addVehicleFieldErrors.capacity) {
+                              setAddVehicleFieldErrors((prev) => ({
+                                ...prev,
+                                capacity: undefined,
+                              }));
+                            }
+                          }}
                           required
                         />
+                        {addVehicleFieldErrors.capacity && (
+                          <div style={fieldErrorStyle}>{addVehicleFieldErrors.capacity}</div>
+                        )}
                       </div>
                     </div>
+
+                    {addVehicleError && (
+                      <div className="ev-alert-error" style={{ marginBottom: 0 }}>
+                        {addVehicleError}
+                      </div>
+                    )}
+
                     <button
                       type="submit"
                       className="ev-btn"
@@ -867,164 +1033,223 @@ export default function UserProfileScreen() {
                   </p>
                 ) : (
                   <div style={{ display: 'grid', gap: '12px' }}>
-                    {vehicles.map((vehicle) => (
-                      <div
-                        key={vehicle.id}
-                        style={{
-                          background: '#FFFFFF',
-                          padding: '15px',
-                          borderRadius: '12px',
-                          border: '1px solid var(--ev-border)',
-                        }}
-                      >
-                        {editingVehicleId === vehicle.id ? (
-                          <form
-                            onSubmit={(e) => void handleSaveVehicleEdit(e, vehicle.id)}
-                            style={{ display: 'grid', gap: '12px' }}
-                          >
-                            <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label style={subtleLabelStyle}>דגם רכב</label>
-                              <input
-                                type="text"
-                                className="form-control"
-                                value={editModel}
-                                onChange={(e) => setEditModel(e.target.value)}
-                                required
-                              />
-                            </div>
-                            <div
-                              style={{
-                                display: 'grid',
-                                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-                                gap: '10px',
-                              }}
+                    {vehicles.map((vehicle) => {
+                      const rowError =
+                        vehicleActionError?.vehicleId === vehicle.id
+                          ? vehicleActionError.message
+                          : null;
+
+                      return (
+                        <div
+                          key={vehicle.id}
+                          style={{
+                            background: '#FFFFFF',
+                            padding: '15px',
+                            borderRadius: '12px',
+                            border: '1px solid var(--ev-border)',
+                          }}
+                        >
+                          {editingVehicleId === vehicle.id ? (
+                            <form
+                              onSubmit={(e) => void handleSaveVehicleEdit(e, vehicle.id)}
+                              noValidate
+                              style={{ display: 'grid', gap: '12px' }}
                             >
                               <div className="form-group" style={{ marginBottom: 0 }}>
-                                <label style={subtleLabelStyle}>סוג שקע</label>
-                                <select
-                                  className="form-control"
-                                  value={editChargerType}
-                                  onChange={(e) =>
-                                    setEditChargerType(e.target.value as ChargerType)
-                                  }
-                                >
-                                  <option value="Type2">Type2</option>
-                                  <option value="CCS">CCS</option>
-                                </select>
-                              </div>
-                              <div className="form-group" style={{ marginBottom: 0 }}>
-                                <label style={subtleLabelStyle}>קיבולת סוללה (kWh)</label>
+                                <label style={subtleLabelStyle}>דגם רכב</label>
                                 <input
-                                  type="number"
-                                  className="form-control tabular-nums"
-                                  min={1}
-                                  max={300}
-                                  value={editCapacityKwh}
-                                  onChange={(e) => setEditCapacityKwh(e.target.value)}
+                                  type="text"
+                                  className="form-control"
+                                  style={{
+                                    borderColor: editVehicleFieldErrors.model ? '#DC2626' : undefined,
+                                  }}
+                                  value={editModel}
+                                  onChange={(e) => {
+                                    setEditModel(e.target.value);
+                                    if (editVehicleFieldErrors.model) {
+                                      setEditVehicleFieldErrors((prev) => ({
+                                        ...prev,
+                                        model: undefined,
+                                      }));
+                                    }
+                                  }}
                                   required
                                 />
+                                {editVehicleFieldErrors.model && (
+                                  <div style={fieldErrorStyle}>{editVehicleFieldErrors.model}</div>
+                                )}
                               </div>
-                            </div>
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                              <button
-                                type="submit"
-                                className="ev-btn ev-btn-auto"
-                                disabled={savingVehicleEdit}
-                              >
-                                {savingVehicleEdit ? 'שומר...' : 'שמור'}
-                              </button>
-                              <button
-                                type="button"
-                                className="ev-btn ev-btn-secondary ev-btn-auto"
-                                onClick={() => setEditingVehicleId(null)}
-                              >
-                                ביטול
-                              </button>
-                            </div>
-                          </form>
-                        ) : (
-                          <div
-                            style={{
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              flexWrap: 'wrap',
-                              gap: '10px',
-                            }}
-                          >
-                            <div>
-                              <span
-                                style={{
-                                  fontWeight: 700,
-                                  fontSize: '1.02rem',
-                                  color: 'var(--ev-ink)',
-                                }}
-                              >
-                                {vehicle.model}
-                              </span>
                               <div
                                 style={{
-                                  fontSize: '0.86rem',
-                                  color: 'var(--ev-ink-muted)',
-                                  marginTop: '4px',
+                                  display: 'grid',
+                                  gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                                  gap: '10px',
                                 }}
                               >
-                                שקע:{' '}
-                                <strong style={{ color: 'var(--ev-ink)' }}>
-                                  {vehicle.supportedChargerType}
-                                </strong>
-                                {' · '}קיבולת:{' '}
-                                <strong className="tabular-nums" style={{ color: 'var(--ev-ink)' }}>
-                                  {vehicle.batteryCapacityKwh} kWh
-                                </strong>
-                              </div>
-                            </div>
-
-                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                              <button
-                                type="button"
-                                className="ev-btn ev-btn-secondary ev-btn-auto"
-                                style={{ padding: '6px 12px', fontSize: '0.84rem' }}
-                                onClick={() => startEditVehicle(vehicle)}
-                              >
-                                ערוך
-                              </button>
-
-                              {confirmDeleteId === vehicle.id ? (
-                                <>
-                                  <button
-                                    type="button"
-                                    className="ev-btn ev-btn-danger ev-btn-auto"
-                                    style={{ padding: '6px 12px', fontSize: '0.84rem' }}
-                                    disabled={deletingId === vehicle.id}
-                                    onClick={() => void handleDeleteVehicle(vehicle.id)}
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                  <label style={subtleLabelStyle}>סוג שקע</label>
+                                  <select
+                                    className="form-control"
+                                    value={editChargerType}
+                                    onChange={(e) =>
+                                      setEditChargerType(e.target.value as ChargerType)
+                                    }
                                   >
-                                    {deletingId === vehicle.id ? 'מוחק...' : 'אשר מחיקה'}
-                                  </button>
+                                    <option value="Type2">Type2</option>
+                                    <option value="CCS">CCS</option>
+                                  </select>
+                                </div>
+                                <div className="form-group" style={{ marginBottom: 0 }}>
+                                  <label style={subtleLabelStyle}>קיבולת סוללה (kWh)</label>
+                                  <input
+                                    type="number"
+                                    className="form-control tabular-nums"
+                                    style={{
+                                      borderColor: editVehicleFieldErrors.capacity
+                                        ? '#DC2626'
+                                        : undefined,
+                                    }}
+                                    min={1}
+                                    max={300}
+                                    value={editCapacityKwh}
+                                    onChange={(e) => {
+                                      setEditCapacityKwh(e.target.value);
+                                      if (editVehicleFieldErrors.capacity) {
+                                        setEditVehicleFieldErrors((prev) => ({
+                                          ...prev,
+                                          capacity: undefined,
+                                        }));
+                                      }
+                                    }}
+                                    required
+                                  />
+                                  {editVehicleFieldErrors.capacity && (
+                                    <div style={fieldErrorStyle}>
+                                      {editVehicleFieldErrors.capacity}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {rowError && (
+                                <div className="ev-alert-error" style={{ marginBottom: 0 }}>
+                                  {rowError}
+                                </div>
+                              )}
+
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                  type="submit"
+                                  className="ev-btn ev-btn-auto"
+                                  disabled={savingVehicleEdit}
+                                >
+                                  {savingVehicleEdit ? 'שומר...' : 'שמור'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ev-btn ev-btn-secondary ev-btn-auto"
+                                  onClick={() => {
+                                    setEditingVehicleId(null);
+                                    setEditVehicleFieldErrors({});
+                                    setVehicleActionError(null);
+                                  }}
+                                >
+                                  ביטול
+                                </button>
+                              </div>
+                            </form>
+                          ) : (
+                            <>
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  flexWrap: 'wrap',
+                                  gap: '10px',
+                                }}
+                              >
+                                <div>
+                                  <span
+                                    style={{
+                                      fontWeight: 700,
+                                      fontSize: '1.02rem',
+                                      color: 'var(--ev-ink)',
+                                    }}
+                                  >
+                                    {vehicle.model}
+                                  </span>
+                                  <div
+                                    style={{
+                                      fontSize: '0.86rem',
+                                      color: 'var(--ev-ink-muted)',
+                                      marginTop: '4px',
+                                    }}
+                                  >
+                                    שקע:{' '}
+                                    <strong style={{ color: 'var(--ev-ink)' }}>
+                                      {vehicle.supportedChargerType}
+                                    </strong>
+                                    {' · '}קיבולת:{' '}
+                                    <strong className="tabular-nums" style={{ color: 'var(--ev-ink)' }}>
+                                      {vehicle.batteryCapacityKwh} kWh
+                                    </strong>
+                                  </div>
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                                   <button
                                     type="button"
                                     className="ev-btn ev-btn-secondary ev-btn-auto"
                                     style={{ padding: '6px 12px', fontSize: '0.84rem' }}
-                                    onClick={() => setConfirmDeleteId(null)}
+                                    onClick={() => startEditVehicle(vehicle)}
                                   >
-                                    בטל
+                                    ערוך
                                   </button>
-                                </>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className="ev-btn ev-btn-danger ev-btn-auto"
-                                  style={{ padding: '6px 12px', fontSize: '0.84rem' }}
-                                  onClick={() => setConfirmDeleteId(vehicle.id)}
-                                >
-                                  מחק
-                                </button>
+
+                                  {confirmDeleteId === vehicle.id ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="ev-btn ev-btn-danger ev-btn-auto"
+                                        style={{ padding: '6px 12px', fontSize: '0.84rem' }}
+                                        disabled={deletingId === vehicle.id}
+                                        onClick={() => void handleDeleteVehicle(vehicle.id)}
+                                      >
+                                        {deletingId === vehicle.id ? 'מוחק...' : 'אשר מחיקה'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="ev-btn ev-btn-secondary ev-btn-auto"
+                                        style={{ padding: '6px 12px', fontSize: '0.84rem' }}
+                                        onClick={() => setConfirmDeleteId(null)}
+                                      >
+                                        בטל
+                                      </button>
+                                    </>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="ev-btn ev-btn-danger ev-btn-auto"
+                                      style={{ padding: '6px 12px', fontSize: '0.84rem' }}
+                                      onClick={() => setConfirmDeleteId(vehicle.id)}
+                                    >
+                                      מחק
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {rowError && (
+                                <div className="ev-alert-error" style={{ marginTop: '10px', marginBottom: 0 }}>
+                                  {rowError}
+                                </div>
                               )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                            </>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

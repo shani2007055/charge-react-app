@@ -1,9 +1,15 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { apiFetch } from '../api/apiClient';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import type { Station } from '../store/stations/stationsState';
 import { hasUserProfile } from '../store/user/userState';
 import { switchUserRole } from '../store/user/userThunks';
+import {
+  resolveExactAddress,
+  reverseGeocodeExactAddress,
+  type AddressSuggestion,
+} from '../utils/geocoding';
+import AddressAutocomplete from './ui/AddressAutocomplete';
 import PageHeader from './ui/PageHeader';
 import StatCard from './ui/StatCard';
 import BlockedHoursBar from './ui/BlockedHoursBar';
@@ -17,6 +23,11 @@ import {
   Plus,
   Clock,
 } from 'lucide-react';
+
+const MIN_PRICE_PER_KWH = 0.1;
+const MAX_PRICE_PER_KWH = 100;
+const MIN_KW = 1;
+const MAX_KW = 1000;
 
 interface UserClaim {
   type: string;
@@ -62,85 +73,25 @@ interface ChargeBooking {
   createdAt: string;
 }
 
-interface NominatimAddress {
-  road?: string;
-  house_number?: string;
-  city?: string;
-  town?: string;
-  village?: string;
-  municipality?: string;
-}
-
-interface NominatimResult {
-  place_id: number;
-  name?: string;
-  display_name: string;
-  class?: string;
-  lat: string;
-  lon: string;
-  address?: NominatimAddress;
-}
-
-interface CleanSuggestion {
-  id: number;
-  label: string;
-  lat: number;
-  lng: number;
-}
-
 type OwnerTab = 'stations' | 'bookings' | 'feedback';
 
-function formatCleanAddress(item: NominatimResult): string {
-  const addr = item.address;
-  const street = addr?.road
-    ? `${addr.road}${addr.house_number ? ` ${addr.house_number}` : ''}`
-    : '';
-  const city = addr?.city || addr?.town || addr?.village || addr?.municipality || '';
-  const placeName =
-    item.name && item.name !== addr?.road && item.name !== city ? item.name : '';
-
-  const parts = [placeName, street, city].filter(Boolean);
-  if (parts.length > 0) {
-    return parts.join(', ');
+function validateStationNumbers(priceValue: string, kwValue: string): string | null {
+  const kw = Number(kwValue);
+  if (!kwValue.trim() || !Number.isFinite(kw) || kw < MIN_KW || kw > MAX_KW) {
+    return `הספק הטעינה חייב להיות בין ${MIN_KW} ל-${MAX_KW} kW.`;
   }
 
-  return item.display_name
-    .split(',')
-    .slice(0, 2)
-    .map((p) => p.trim())
-    .join(', ');
-}
-
-function normalizeAddressQuery(raw: string): string {
-  return raw
-    .trim()
-    .replace(/(^|\s)(רחוב|רח׳|רח'|מס'|מספר)\s+/g, '$1')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-async function resolveAddressCoords(rawAddress: string): Promise<{ lat: number; lng: number } | null> {
-  const query = normalizeAddressQuery(rawAddress);
-  if (!query) return null;
-
-  const res = await fetch(
-    `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=il&accept-language=he&limit=5&q=${encodeURIComponent(query)}`
-  );
-  if (!res.ok) {
-    throw new Error('שגיאה באיתור הכתובת');
+  const price = Number(priceValue);
+  if (
+    !priceValue.trim() ||
+    !Number.isFinite(price) ||
+    price < MIN_PRICE_PER_KWH ||
+    price > MAX_PRICE_PER_KWH
+  ) {
+    return `המחיר לקוט"ש חייב להיות בין ${MIN_PRICE_PER_KWH} ₪ ל-${MAX_PRICE_PER_KWH} ₪.`;
   }
 
-  const results = (await res.json()) as NominatimResult[];
-  if (results.length === 0) return null;
-
-  // תעדוף תוצאה עם מספר בית מדויק על פני מרכז רחוב
-  const best =
-    results.find((r) => Boolean(r.address?.house_number || r.class === 'building')) ?? results[0];
-  const lat = Number(best.lat);
-  const lng = Number(best.lon);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-
-  return { lat, lng };
+  return null;
 }
 
 function getBookingStatusStyle(status: string): { label: string; bg: string; color: string; border: string } {
@@ -216,9 +167,7 @@ export default function StationOwnerScreen() {
   const [name, setName] = useState('');
   const [address, setAddress] = useState('');
   const [addressCoords, setAddressCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [suggestions, setSuggestions] = useState<CleanSuggestion[]>([]);
-  const [hoveredSuggestionId, setHoveredSuggestionId] = useState<number | null>(null);
-  const [loadingSuggestions, setLoadingSuggestions] = useState<boolean>(false);
+  const [addressHint, setAddressHint] = useState<string | null>(null);
   const [detectingLocation, setDetectingLocation] = useState<boolean>(false);
   const [chargerType, setChargerType] = useState<'CCS' | 'Type2'>('Type2');
   const [maxKw, setMaxKw] = useState('50');
@@ -226,22 +175,46 @@ export default function StationOwnerScreen() {
   const [newBlockedHours, setNewBlockedHours] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
 
-  // מונע פתיחה חוזרת של הצעות מיד אחרי בחירה או זיהוי GPS
-  const skipNextAutocompleteRef = useRef<boolean>(false);
-
   // שדות לעריכת עמדה קיימת
   const [editingStationId, setEditingStationId] = useState<number | null>(null);
   const [editName, setEditName] = useState('');
   const [editAddress, setEditAddress] = useState('');
+  const [editAddressCoords, setEditAddressCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [editAddressHint, setEditAddressHint] = useState<string | null>(null);
   const [editPrice, setEditPrice] = useState('');
   const [editMaxKw, setEditMaxKw] = useState('');
   const [editChargerType, setEditChargerType] = useState<'CCS' | 'Type2'>('Type2');
+  const [editError, setEditError] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
   // שדות לעריכת שעות השבתה אוטומטיות
   const [scheduleStationId, setScheduleStationId] = useState<number | null>(null);
   const [draftBlockedHours, setDraftBlockedHours] = useState<number[]>([]);
   const [savingHours, setSavingHours] = useState(false);
+
+  const parsedAddPrice = Number(pricePerKwh);
+  const addPriceInvalid =
+    pricePerKwh.trim() !== '' &&
+    (!Number.isFinite(parsedAddPrice) ||
+      parsedAddPrice < MIN_PRICE_PER_KWH ||
+      parsedAddPrice > MAX_PRICE_PER_KWH);
+
+  const parsedAddKw = Number(maxKw);
+  const addKwInvalid =
+    maxKw.trim() !== '' &&
+    (!Number.isFinite(parsedAddKw) || parsedAddKw < MIN_KW || parsedAddKw > MAX_KW);
+
+  const parsedEditPrice = Number(editPrice);
+  const editPriceInvalid =
+    editPrice.trim() !== '' &&
+    (!Number.isFinite(parsedEditPrice) ||
+      parsedEditPrice < MIN_PRICE_PER_KWH ||
+      parsedEditPrice > MAX_PRICE_PER_KWH);
+
+  const parsedEditKw = Number(editMaxKw);
+  const editKwInvalid =
+    editMaxKw.trim() !== '' &&
+    (!Number.isFinite(parsedEditKw) || parsedEditKw < MIN_KW || parsedEditKw > MAX_KW);
 
   const loadOwnerData = async () => {
     try {
@@ -278,81 +251,35 @@ export default function StationOwnerScreen() {
     void loadOwnerData();
   }, []);
 
-  useEffect(() => {
-    if (!showAddForm) {
-      setSuggestions([]);
-      setHoveredSuggestionId(null);
-      return;
-    }
-
-    if (skipNextAutocompleteRef.current) {
-      skipNextAutocompleteRef.current = false;
-      return;
-    }
-
-    const query = address.trim();
-    if (query.length < 3 || addressCoords !== null) {
-      setSuggestions([]);
-      setHoveredSuggestionId(null);
-      return;
-    }
-
-    const controller = new AbortController();
-    const timerId = window.setTimeout(async () => {
-      setLoadingSuggestions(true);
-      try {
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&countrycodes=il&accept-language=he&limit=8&q=${encodeURIComponent(query)}`,
-          { signal: controller.signal }
-        );
-        if (res.ok) {
-          const data = (await res.json()) as NominatimResult[];
-          const seen = new Set<string>();
-          const cleaned: CleanSuggestion[] = [];
-          for (const item of data) {
-            const label = formatCleanAddress(item);
-            if (!seen.has(label)) {
-              seen.add(label);
-              cleaned.push({
-                id: item.place_id,
-                label,
-                lat: Number(item.lat),
-                lng: Number(item.lon),
-              });
-            }
-            if (cleaned.length >= 5) break;
-          }
-          setSuggestions(cleaned);
-          setHoveredSuggestionId(null);
-        }
-      } catch (err) {
-        if (err instanceof Error && err.name === 'AbortError') return;
-        setSuggestions([]);
-        setHoveredSuggestionId(null);
-      } finally {
-        setLoadingSuggestions(false);
-      }
-    }, 400);
-
-    return () => {
-      window.clearTimeout(timerId);
-      controller.abort();
-    };
-  }, [showAddForm, address, addressCoords]);
-
-  const handleSelectSuggestion = (item: CleanSuggestion) => {
-    skipNextAutocompleteRef.current = true;
+  const handleSelectAddSuggestion = (item: AddressSuggestion) => {
     setAddress(item.label);
-    setAddressCoords({ lat: item.lat, lng: item.lng });
-    setSuggestions([]);
-    setHoveredSuggestionId(null);
+    setAddressCoords(null);
     setError(null);
+
+    if (item.hasHouseNumber) {
+      setAddressCoords({ lat: item.lat, lng: item.lng });
+      setAddressHint(null);
+    } else {
+      setAddressHint('נבחר רחוב — יש להוסיף מספר בית ולבחור מהרשימה (או להשלים ידנית).');
+    }
+  };
+
+  const handleSelectEditSuggestion = (item: AddressSuggestion) => {
+    setEditAddress(item.label);
+    setEditAddressCoords(null);
+    setEditError(null);
+
+    if (item.hasHouseNumber) {
+      setEditAddressCoords({ lat: item.lat, lng: item.lng });
+      setEditAddressHint(null);
+    } else {
+      setEditAddressHint('נבחר רחוב — יש להוסיף מספר בית לפני השמירה.');
+    }
   };
 
   const handleDetectLocation = () => {
     setError(null);
-    setSuggestions([]);
-    setHoveredSuggestionId(null);
+    setAddressHint(null);
 
     if (!navigator.geolocation) {
       setError('הדפדפן שלך אינו תומך בזיהוי מיקום.');
@@ -364,34 +291,21 @@ export default function StationOwnerScreen() {
       async (position) => {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
-        skipNextAutocompleteRef.current = true;
-        setAddressCoords({ lat, lng });
 
         try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&accept-language=he`
-          );
-          if (res.ok) {
-            const data = (await res.json()) as {
-              display_name?: string;
-              address?: NominatimAddress;
-            };
-            const cityName =
-              data.address?.city ||
-              data.address?.town ||
-              data.address?.village ||
-              data.address?.municipality ||
-              '';
-            const road = data.address?.road
-              ? `${data.address.road}${data.address.house_number ? ` ${data.address.house_number}` : ''}`
-              : '';
-            const shortAddress = [road, cityName].filter(Boolean).join(', ');
-            setAddress(shortAddress || data.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-          } else {
-            setAddress(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+          const detected = await reverseGeocodeExactAddress(lat, lng);
+          setAddress(detected.address);
+          setAddressCoords({ lat, lng });
+          if (!detected.hasHouseNumber) {
+            setAddressHint('הרחוב זוהה לפי GPS — מומלץ להשלים מספר בית מדויק.');
           }
-        } catch {
-          setAddress(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+        } catch (err) {
+          setAddressCoords(null);
+          setError(
+            err instanceof Error
+              ? err.message
+              : 'לא הצלחנו לתרגם את המיקום לכתובת רחוב מדויקת. יש להזין רחוב, מספר בית ועיר ידנית.'
+          );
         } finally {
           setDetectingLocation(false);
         }
@@ -407,16 +321,31 @@ export default function StationOwnerScreen() {
     e.preventDefault();
     setError(null);
     setSuccessMessage(null);
-    setSuggestions([]);
-    setHoveredSuggestionId(null);
 
     try {
+      const validationError = validateStationNumbers(pricePerKwh, maxKw);
+      if (validationError) {
+        throw new Error(validationError);
+      }
+
+      if (!address.trim()) {
+        throw new Error('יש להזין כתובת מדויקת הכוללת רחוב, מספר בית ועיר.');
+      }
+
       setSaving(true);
-      const coords = addressCoords ?? (await resolveAddressCoords(address));
-      if (!coords) {
-        throw new Error(
-          `לא הצלחנו לאתר את הכתובת "${address}". נסי לרשום רחוב, מספר בית ועיר (למשל: התשעים ושלוש 5, פתח תקווה).`
-        );
+
+      let finalLat: number;
+      let finalLng: number;
+      let finalAddress = address.trim();
+
+      if (addressCoords) {
+        finalLat = addressCoords.lat;
+        finalLng = addressCoords.lng;
+      } else {
+        const resolved = await resolveExactAddress(address);
+        finalLat = resolved.lat;
+        finalLng = resolved.lng;
+        finalAddress = resolved.normalizedAddress;
       }
 
       if (needsOwnerSetup || !hasUserProfile(token, 'Owner')) {
@@ -426,10 +355,10 @@ export default function StationOwnerScreen() {
       await apiFetch('/ChargingStations', {
         method: 'POST',
         body: JSON.stringify({
-          name,
-          address: address.trim(),
-          latitude: coords.lat,
-          longitude: coords.lng,
+          name: name.trim(),
+          address: finalAddress,
+          latitude: finalLat,
+          longitude: finalLng,
           chargerType,
           maxKw: Number(maxKw),
           pricePerKwh: Number(pricePerKwh),
@@ -441,7 +370,10 @@ export default function StationOwnerScreen() {
       setName('');
       setAddress('');
       setAddressCoords(null);
+      setAddressHint(null);
       setChargerType('Type2');
+      setMaxKw('50');
+      setPricePerKwh('1.8');
       setNewBlockedHours([]);
       setNeedsOwnerSetup(false);
       setShowAddForm(false);
@@ -470,9 +402,12 @@ export default function StationOwnerScreen() {
 
   const startEditing = (station: Station) => {
     setScheduleStationId(null);
+    setEditError(null);
+    setEditAddressHint(null);
     setEditingStationId(station.id);
     setEditName(station.name);
     setEditAddress(station.address);
+    setEditAddressCoords({ lat: station.latitude, lng: station.longitude });
     setEditPrice(String(station.pricePerKwh));
     setEditMaxKw(String(station.maxKw));
     setEditChargerType(station.chargerType === 'CCS' ? 'CCS' : 'Type2');
@@ -481,26 +416,47 @@ export default function StationOwnerScreen() {
   const handleSaveEdit = async (station: Station) => {
     try {
       setError(null);
+      setEditError(null);
       setSuccessMessage(null);
+
+      const validationError = validateStationNumbers(editPrice, editMaxKw);
+      if (validationError) {
+        throw new Error(validationError);
+      }
+
+      const trimmedAddress = editAddress.trim();
+      if (!trimmedAddress) {
+        throw new Error('יש להזין כתובת מדויקת הכוללת רחוב, מספר בית ועיר.');
+      }
+
       setSavingEdit(true);
 
-      const trimmedAddress = editAddress.trim() || station.address;
       const addressChanged = trimmedAddress !== station.address.trim();
       const willResetToPending = station.approvalStatus === 'Rejected' || addressChanged;
-      const resolved = await resolveAddressCoords(trimmedAddress);
-      if (!resolved && addressChanged) {
-        throw new Error(
-          `לא הצלחנו לאתר את הכתובת "${trimmedAddress}". נסי לרשום רחוב, מספר בית ועיר.`
-        );
+
+      let nextAddress = trimmedAddress;
+      let nextLat = station.latitude;
+      let nextLng = station.longitude;
+
+      if (addressChanged) {
+        if (editAddressCoords) {
+          nextLat = editAddressCoords.lat;
+          nextLng = editAddressCoords.lng;
+        } else {
+          const resolved = await resolveExactAddress(trimmedAddress);
+          nextAddress = resolved.normalizedAddress;
+          nextLat = resolved.lat;
+          nextLng = resolved.lng;
+        }
       }
 
       await apiFetch(`/ChargingStations/${station.id}`, {
         method: 'PUT',
         body: JSON.stringify({
-          name: editName,
-          address: trimmedAddress,
-          latitude: resolved ? resolved.lat : station.latitude,
-          longitude: resolved ? resolved.lng : station.longitude,
+          name: editName.trim(),
+          address: nextAddress,
+          latitude: nextLat,
+          longitude: nextLng,
           chargerType: editChargerType,
           maxKw: Number(editMaxKw),
           pricePerKwh: Number(editPrice),
@@ -510,6 +466,8 @@ export default function StationOwnerScreen() {
       });
 
       setEditingStationId(null);
+      setEditError(null);
+      setEditAddressHint(null);
       setSuccessMessage(
         willResetToPending
           ? `פרטי העמדה "${editName}" עודכנו והעמדה נשלחה מחדש לאישור מנהל המערכת.`
@@ -517,7 +475,9 @@ export default function StationOwnerScreen() {
       );
       await loadOwnerData();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'שגיאה בעדכון פרטי העמדה');
+      const msg = err instanceof Error ? err.message : 'שגיאה בעדכון פרטי העמדה';
+      setEditError(msg);
+      setError(msg);
     } finally {
       setSavingEdit(false);
     }
@@ -525,6 +485,8 @@ export default function StationOwnerScreen() {
 
   const startScheduleEditing = (station: Station) => {
     setEditingStationId(null);
+    setEditError(null);
+    setEditAddressHint(null);
     setScheduleStationId(station.id);
     setDraftBlockedHours(station.blockedHours ?? []);
   };
@@ -675,7 +637,7 @@ export default function StationOwnerScreen() {
           <div className="screen-header" style={{ marginBottom: '16px' }}>
             <div>
               <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>הוספת עמדת טעינה חדשה</div>
-              <p className="ev-subtitle">הכתובת מאותרת אוטומטית מהצעות החיפוש או ממיקום נוכחי</p>
+              <p className="ev-subtitle">יש להזין ולבחור כתובת מדויקת (רחוב, מספר בית ועיר) או לזהות מיקום נוכחי</p>
             </div>
           </div>
 
@@ -716,11 +678,16 @@ export default function StationOwnerScreen() {
                 type="number"
                 className="form-control tabular-nums"
                 required
-                min={1}
-                max={1000}
+                min={MIN_KW}
+                max={MAX_KW}
                 value={maxKw}
                 onChange={(e) => setMaxKw(e.target.value)}
               />
+              {addKwInvalid && (
+                <div style={{ fontSize: '0.76rem', color: 'var(--ev-danger)', marginTop: '4px' }}>
+                  הספק חייב להיות בין {MIN_KW} ל-{MAX_KW} kW
+                </div>
+              )}
             </div>
 
             <div className="form-group">
@@ -730,93 +697,49 @@ export default function StationOwnerScreen() {
                 step="0.1"
                 className="form-control tabular-nums"
                 required
-                min={0.1}
+                min={MIN_PRICE_PER_KWH}
+                max={MAX_PRICE_PER_KWH}
                 value={pricePerKwh}
                 onChange={(e) => setPricePerKwh(e.target.value)}
               />
-            </div>
-
-            <div className="form-group" style={{ gridColumn: '1 / -1', position: 'relative' }}>
-              <label>כתובת מלאה</label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <input
-                  type="text"
-                  className="form-control"
-                  required
-                  placeholder="הקלד כתובת מלאה או לחץ זהה מיקום..."
-                  value={address}
-                  onChange={(e) => {
-                    setAddress(e.target.value);
-                    setAddressCoords(null);
-                  }}
-                />
-                <button
-                  type="button"
-                  className="ev-btn ev-btn-secondary ev-btn-auto"
-                  disabled={detectingLocation}
-                  onClick={handleDetectLocation}
-                >
-                  {detectingLocation ? 'מאתר...' : 'זהה מיקום'}
-                </button>
-              </div>
-
-              {loadingSuggestions && (
-                <div
-                  style={{
-                    fontSize: '0.78rem',
-                    color: 'var(--ev-ink-soft)',
-                    marginTop: '6px',
-                  }}
-                >
-                  מחפש הצעות כתובות...
+              {addPriceInvalid && (
+                <div style={{ fontSize: '0.76rem', color: 'var(--ev-danger)', marginTop: '4px' }}>
+                  מחיר מותר: {MIN_PRICE_PER_KWH}–{MAX_PRICE_PER_KWH} ₪ לקוט&quot;ש
                 </div>
               )}
+            </div>
 
-              {suggestions.length > 0 && (
-                <ul
-                  onMouseLeave={() => setHoveredSuggestionId(null)}
-                  style={{
-                    position: 'absolute',
-                    top: '100%',
-                    left: 0,
-                    right: 0,
-                    zIndex: 20,
-                    background: 'var(--ev-surface-solid)',
-                    border: '1px solid var(--ev-border)',
-                    borderRadius: '10px',
-                    listStyle: 'none',
-                    margin: '6px 0 0 0',
-                    padding: 0,
-                    maxHeight: '220px',
-                    overflowY: 'auto',
-                    boxShadow: '0 10px 25px rgba(15, 23, 42, 0.1)',
-                  }}
-                >
-                  {suggestions.map((item) => {
-                    const isHovered = hoveredSuggestionId === item.id;
-                    return (
-                      <li
-                        key={item.id}
-                        onClick={() => handleSelectSuggestion(item)}
-                        onMouseEnter={() => setHoveredSuggestionId(item.id)}
-                        style={{
-                          padding: '10px 14px',
-                          fontSize: '0.88rem',
-                          color: isHovered ? 'var(--ev-brand-hover)' : 'var(--ev-ink)',
-                          background: isHovered ? 'var(--ev-brand-soft)' : 'transparent',
-                          fontWeight: isHovered ? 600 : 400,
-                          textAlign: 'right',
-                          cursor: 'pointer',
-                          borderBottom: '1px solid var(--ev-surface-subtle)',
-                          transition: 'background-color 0.15s ease, color 0.15s ease',
-                        }}
-                      >
-                        {item.label}
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
+            <div style={{ gridColumn: '1 / -1' }}>
+              <AddressAutocomplete
+                exactOnly
+                label="כתובת מדויקת (רחוב, מספר בית ועיר)"
+                placeholder="למשל: טרומפלדור 12, תל אביב (בחרי מההצעות או הקלידי רחוב, מספר ועיר)"
+                value={address}
+                isSelected={addressCoords !== null}
+                disabled={saving}
+                hint={addressHint}
+                onChange={(text) => {
+                  setAddress(text);
+                  setAddressCoords(null);
+                  setAddressHint(null);
+                }}
+                onSelect={handleSelectAddSuggestion}
+                onClear={() => {
+                  setAddress('');
+                  setAddressCoords(null);
+                  setAddressHint(null);
+                }}
+                rightAction={
+                  <button
+                    type="button"
+                    className="ev-btn ev-btn-secondary ev-btn-auto"
+                    disabled={detectingLocation || saving}
+                    onClick={handleDetectLocation}
+                  >
+                    {detectingLocation ? 'מאתר...' : 'זהה מיקום'}
+                  </button>
+                }
+              />
             </div>
 
             <div
@@ -833,8 +756,12 @@ export default function StationOwnerScreen() {
           </div>
 
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '14px' }}>
-            <button type="submit" className="ev-btn ev-btn-auto" disabled={saving}>
-              {saving ? 'מאתר כתובת ושומר...' : 'שמור עמדה חדשה'}
+            <button
+              type="submit"
+              className="ev-btn ev-btn-auto"
+              disabled={saving || addPriceInvalid || addKwInvalid}
+            >
+              {saving ? 'מאמת כתובת ושומר...' : 'שמור עמדה חדשה'}
             </button>
             <button
               type="button"
@@ -1174,11 +1101,15 @@ export default function StationOwnerScreen() {
                             <button
                               type="button"
                               className="ev-btn ev-btn-secondary ev-btn-auto"
-                              onClick={() =>
-                                editingStationId === station.id
-                                  ? setEditingStationId(null)
-                                  : startEditing(station)
-                              }
+                              onClick={() => {
+                                if (editingStationId === station.id) {
+                                  setEditingStationId(null);
+                                  setEditError(null);
+                                  setEditAddressHint(null);
+                                } else {
+                                  startEditing(station);
+                                }
+                              }}
                             >
                               {editingStationId === station.id ? 'ביטול עריכה' : 'ערוך פרטים'}
                             </button>
@@ -1239,68 +1170,115 @@ export default function StationOwnerScreen() {
                               marginTop: '14px',
                               paddingTop: '14px',
                               borderTop: '1px solid var(--ev-border)',
-                              display: 'grid',
-                              gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))',
-                              gap: '10px',
-                              alignItems: 'end',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '12px',
                             }}
                           >
-                            <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label>שם</label>
-                              <input
-                                type="text"
-                                className="form-control"
-                                value={editName}
-                                onChange={(e) => setEditName(e.target.value)}
-                              />
-                            </div>
-                            <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label>כתובת</label>
-                              <input
-                                type="text"
-                                className="form-control"
-                                value={editAddress}
-                                onChange={(e) => setEditAddress(e.target.value)}
-                              />
-                            </div>
-                            <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label>מחיר (₪/kWh)</label>
-                              <input
-                                type="number"
-                                step="0.1"
-                                className="form-control tabular-nums"
-                                value={editPrice}
-                                onChange={(e) => setEditPrice(e.target.value)}
-                              />
-                            </div>
-                            <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label>הספק (kW)</label>
-                              <input
-                                type="number"
-                                className="form-control tabular-nums"
-                                value={editMaxKw}
-                                onChange={(e) => setEditMaxKw(e.target.value)}
-                              />
-                            </div>
-                            <div className="form-group" style={{ marginBottom: 0 }}>
-                              <label>סוג שקע</label>
-                              <select
-                                className="form-control"
-                                value={editChargerType}
-                                onChange={(e) => setEditChargerType(e.target.value as 'CCS' | 'Type2')}
-                              >
-                                <option value="Type2">Type2</option>
-                                <option value="CCS">CCS</option>
-                              </select>
-                            </div>
-                            <button
-                              type="button"
-                              className="ev-btn"
-                              disabled={savingEdit}
-                              onClick={() => void handleSaveEdit(station)}
+                            <div
+                              style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                                gap: '10px',
+                                alignItems: 'end',
+                              }}
                             >
-                              {savingEdit ? 'מעדכן...' : 'שמור שינויים'}
-                            </button>
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label>שם</label>
+                                <input
+                                  type="text"
+                                  className="form-control"
+                                  value={editName}
+                                  onChange={(e) => setEditName(e.target.value)}
+                                />
+                              </div>
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label>מחיר (₪/kWh)</label>
+                                <input
+                                  type="number"
+                                  step="0.1"
+                                  min={MIN_PRICE_PER_KWH}
+                                  max={MAX_PRICE_PER_KWH}
+                                  className="form-control tabular-nums"
+                                  value={editPrice}
+                                  onChange={(e) => setEditPrice(e.target.value)}
+                                />
+                              </div>
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label>הספק (kW)</label>
+                                <input
+                                  type="number"
+                                  min={MIN_KW}
+                                  max={MAX_KW}
+                                  className="form-control tabular-nums"
+                                  value={editMaxKw}
+                                  onChange={(e) => setEditMaxKw(e.target.value)}
+                                />
+                              </div>
+                              <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label>סוג שקע</label>
+                                <select
+                                  className="form-control"
+                                  value={editChargerType}
+                                  onChange={(e) => setEditChargerType(e.target.value as 'CCS' | 'Type2')}
+                                >
+                                  <option value="Type2">Type2</option>
+                                  <option value="CCS">CCS</option>
+                                </select>
+                              </div>
+
+                              <div style={{ gridColumn: '1 / -1' }}>
+                                <AddressAutocomplete
+                                  exactOnly
+                                  label="כתובת מדויקת (רחוב, מספר בית ועיר)"
+                                  placeholder="למשל: טרומפלדור 12, תל אביב"
+                                  value={editAddress}
+                                  isSelected={editAddressCoords !== null}
+                                  disabled={savingEdit}
+                                  hint={editAddressHint}
+                                  onChange={(text) => {
+                                    setEditAddress(text);
+                                    setEditAddressCoords(null);
+                                    setEditAddressHint(null);
+                                    setEditError(null);
+                                  }}
+                                  onSelect={handleSelectEditSuggestion}
+                                  onClear={() => {
+                                    setEditAddress('');
+                                    setEditAddressCoords(null);
+                                    setEditAddressHint(null);
+                                    setEditError(null);
+                                  }}
+                                />
+                              </div>
+                            </div>
+
+                            {editPriceInvalid && (
+                              <div style={{ fontSize: '0.78rem', color: 'var(--ev-danger)' }}>
+                                המחיר לקוט&quot;ש חייב להיות בין {MIN_PRICE_PER_KWH} ₪ ל-{MAX_PRICE_PER_KWH} ₪.
+                              </div>
+                            )}
+                            {editKwInvalid && (
+                              <div style={{ fontSize: '0.78rem', color: 'var(--ev-danger)' }}>
+                                ההספק חייב להיות בין {MIN_KW} ל-{MAX_KW} kW.
+                              </div>
+                            )}
+                            {editError && (
+                              <div className="ev-alert-error" style={{ marginBottom: 0 }}>
+                                {editError}
+                              </div>
+                            )}
+
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                className="ev-btn ev-btn-auto"
+                                disabled={savingEdit || editPriceInvalid || editKwInvalid}
+                                onClick={() => void handleSaveEdit(station)}
+                              >
+                                {savingEdit ? 'מעדכן...' : 'שמור שינויים'}
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
