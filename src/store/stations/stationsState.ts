@@ -15,6 +15,11 @@ export interface Station {
   averageRating: number | null;
   reviewsCount: number;
   currentStatus: string | null;
+  ownerName?: string | null;
+  ownerEmail?: string | null;
+  ownerPhone?: string | null;
+  approvalStatus?: 'Pending' | 'Approved' | 'Rejected';
+  rejectionReason?: string | null;
 }
 
 export interface RankedStationResult {

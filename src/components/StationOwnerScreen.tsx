@@ -169,6 +169,36 @@ function getBookingStatusStyle(status: string): { label: string; bg: string; col
   return { label: status, bg: '#F8FAFC', color: '#475569', border: '#E2E8F0' };
 }
 
+function getApprovalBadge(status?: string): {
+  label: string;
+  bg: string;
+  color: string;
+  border: string;
+} {
+  if (status === 'Pending') {
+    return {
+      label: 'ממתינה לאישור מנהל',
+      bg: '#FFFBEB',
+      color: '#B45309',
+      border: '#FDE68A',
+    };
+  }
+  if (status === 'Rejected') {
+    return {
+      label: 'נדחתה ע״י מנהל',
+      bg: '#FEF2F2',
+      color: '#B91C1C',
+      border: '#FECACA',
+    };
+  }
+  return {
+    label: 'מאושרת במפה',
+    bg: '#ECFDF5',
+    color: '#047857',
+    border: '#A7F3D0',
+  };
+}
+
 export default function StationOwnerScreen() {
   const dispatch = useAppDispatch();
   const { token } = useAppSelector((state) => state.user);
@@ -416,7 +446,7 @@ export default function StationOwnerScreen() {
       setNeedsOwnerSetup(false);
       setShowAddForm(false);
       setActiveTab('stations');
-      setSuccessMessage('העמדה החדשה נוספה בהצלחה ומוצגת לנהגים במפה.');
+      setSuccessMessage('העמדה החדשה נשלחה לאישור מנהל המערכת ותופיע לנהגים במפה לאחר האישור.');
       await loadOwnerData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בהוספת העמדה');
@@ -455,8 +485,10 @@ export default function StationOwnerScreen() {
       setSavingEdit(true);
 
       const trimmedAddress = editAddress.trim() || station.address;
+      const addressChanged = trimmedAddress !== station.address.trim();
+      const willResetToPending = station.approvalStatus === 'Rejected' || addressChanged;
       const resolved = await resolveAddressCoords(trimmedAddress);
-      if (!resolved && trimmedAddress !== station.address.trim()) {
+      if (!resolved && addressChanged) {
         throw new Error(
           `לא הצלחנו לאתר את הכתובת "${trimmedAddress}". נסי לרשום רחוב, מספר בית ועיר.`
         );
@@ -478,7 +510,11 @@ export default function StationOwnerScreen() {
       });
 
       setEditingStationId(null);
-      setSuccessMessage(`פרטי העמדה "${editName}" עודכנו בהצלחה.`);
+      setSuccessMessage(
+        willResetToPending
+          ? `פרטי העמדה "${editName}" עודכנו והעמדה נשלחה מחדש לאישור מנהל המערכת.`
+          : `פרטי העמדה "${editName}" עודכנו בהצלחה.`
+      );
       await loadOwnerData();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'שגיאה בעדכון פרטי העמדה');
@@ -998,6 +1034,7 @@ export default function StationOwnerScreen() {
                   {dashboard.stations.map((station) => {
                     const blockedCount = station.blockedHours?.length ?? 0;
                     const isScheduleOpen = scheduleStationId === station.id;
+                    const approvalBadge = getApprovalBadge(station.approvalStatus);
 
                     return (
                       <div
@@ -1007,9 +1044,11 @@ export default function StationOwnerScreen() {
                           padding: '16px 18px',
                           borderRadius: '11px',
                           border:
-                            station.currentStatus === 'Faulty'
+                            station.currentStatus === 'Faulty' || station.approvalStatus === 'Rejected'
                               ? '1px solid var(--ev-danger-border)'
-                              : '1px solid var(--ev-border)',
+                              : station.approvalStatus === 'Pending'
+                                ? '1px solid #FDE68A'
+                                : '1px solid var(--ev-border)',
                         }}
                       >
                         <div
@@ -1021,7 +1060,7 @@ export default function StationOwnerScreen() {
                             gap: '12px',
                           }}
                         >
-                          <div>
+                          <div style={{ flex: '1 1 280px' }}>
                             <div
                               style={{
                                 fontWeight: 700,
@@ -1034,6 +1073,19 @@ export default function StationOwnerScreen() {
                               }}
                             >
                               <span>{station.name}</span>
+                              <span
+                                style={{
+                                  fontSize: '0.74rem',
+                                  fontWeight: 600,
+                                  padding: '2px 8px',
+                                  borderRadius: '6px',
+                                  background: approvalBadge.bg,
+                                  color: approvalBadge.color,
+                                  border: `1px solid ${approvalBadge.border}`,
+                                }}
+                              >
+                                {approvalBadge.label}
+                              </span>
                               {station.isClosedBySchedule && (
                                 <span
                                   style={{
@@ -1077,6 +1129,26 @@ export default function StationOwnerScreen() {
                               </span>
                               {blockedCount > 0 && ` · ${blockedCount} שעות חסומות`}
                             </div>
+
+                            {station.approvalStatus === 'Rejected' && (
+                              <div
+                                style={{
+                                  marginTop: '8px',
+                                  padding: '8px 12px',
+                                  borderRadius: '8px',
+                                  background: '#FEF2F2',
+                                  border: '1px solid #FECACA',
+                                  color: '#991B1B',
+                                  fontSize: '0.82rem',
+                                }}
+                              >
+                                <strong>סיבת הדחייה:</strong>{' '}
+                                {station.rejectionReason?.trim() || 'לא צוינה סיבה.'}{' '}
+                                <span style={{ color: '#B91C1C' }}>
+                                  (ניתן לערוך את פרטי העמדה ולשמור כדי לשלוח לאישור חוזר)
+                                </span>
+                              </div>
+                            )}
                           </div>
 
                           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>

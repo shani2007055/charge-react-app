@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
   useMemo,
 } from 'react';
@@ -19,9 +20,15 @@ import {
   ChevronLeft,
   ChevronRight,
   Trash2,
+  CheckCircle2,
+  XCircle,
+  MapPin,
+  Clock,
+  X,
   type LucideIcon,
 } from 'lucide-react';
 import { useAppSelector } from '../../store/hooks';
+import type { Station } from '../../store/stations/stationsState';
 import ConfirmDialog from '../ui/ConfirmDialog';
 import PageHeader from '../ui/PageHeader';
 import StatCard from '../ui/StatCard';
@@ -29,9 +36,11 @@ import StatusBadge from '../ui/StatusBadge';
 import {
   deleteAdminDriver,
   deleteAdminOwner,
+  deleteAdminReview,
   deleteAdminStatusLog,
   deleteAdminUser,
   fetchAdminData,
+  reviewAdminStation,
 } from './adminApi';
 import {
   emptyAdminData,
@@ -106,6 +115,7 @@ interface TableData {
   headers: string[];
   rows: TableRow[];
   statusColumn?: number;
+  approvalColumn?: number;
   hasActions?: boolean;
 }
 
@@ -114,6 +124,7 @@ interface PendingAdminAction {
   message: string;
   confirmText: string;
   successMessage: string;
+  variant?: 'primary' | 'danger';
   run: () => Promise<void>;
 }
 
@@ -122,6 +133,23 @@ function formatDate(value: string) {
   return Number.isNaN(date.getTime())
     ? '—'
     : date.toLocaleString('he-IL');
+}
+
+function getApprovalMeta(status?: string | null): {
+  label: string;
+  tone: 'green' | 'orange' | 'red';
+} {
+  if (status === 'Pending') {
+    return { label: 'ממתינה לאישור', tone: 'orange' };
+  }
+  if (status === 'Rejected') {
+    return { label: 'נדחתה', tone: 'red' };
+  }
+  return { label: 'מאושרת', tone: 'green' };
+}
+
+function getMapsUrl(lat: number, lng: number): string {
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}`;
 }
 
 function getTable(
@@ -183,19 +211,25 @@ function getTable(
       return {
         headers: [
           'מזהה', 'שם עמדה', 'כתובת',
-          'מזהה בעלים', 'מחבר', 'הספק',
-          'מחיר לקוט״ש', 'דירוג', 'סטטוס',
+          'בעלים', 'מחבר', 'הספק',
+          'מחיר לקוט״ש', 'דירוג', 'מצב תפעולי', 'אישור מנהל',
         ],
         statusColumn: 8,
+        approvalColumn: 9,
+        hasActions: true,
         rows: data.stations.map((s) => ({
           id: s.id,
           cells: [
-            s.id, s.name, s.address, s.ownerId,
+            s.id,
+            s.name,
+            s.address,
+            s.ownerName ? `${s.ownerName} (#${s.ownerId})` : `#${s.ownerId}`,
             s.chargerType,
             `${s.maxKw} kW`,
             `₪${s.pricePerKwh.toFixed(2)}`,
             s.averageRating?.toFixed(1) ?? '—',
             s.isActive ? s.currentStatus : 'Inactive',
+            s.approvalStatus ?? 'Approved',
           ],
         })),
       };
@@ -242,6 +276,7 @@ function getTable(
           'מזהה', 'הזמנה', 'עמדה', 'נהג',
           'דירוג', 'ביקורת', 'תאריך',
         ],
+        hasActions: true,
         rows: data.reviews.map((r) => ({
           id: r.id,
           cells: [
@@ -294,6 +329,24 @@ export default function AdminDashboard() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
+  // דיאלוג דחיית עמדה עם סיבה
+  const rejectDialogRef = useRef<HTMLDialogElement>(null);
+  const [rejectTarget, setRejectTarget] = useState<Station | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [rejectValidationError, setRejectValidationError] = useState<string | null>(null);
+  const [rejectLoading, setRejectLoading] = useState(false);
+
+  useEffect(() => {
+    const dialog = rejectDialogRef.current;
+    if (!dialog) return;
+    if (rejectTarget && !dialog.open) {
+      dialog.showModal();
+    }
+    if (!rejectTarget && dialog.open) {
+      dialog.close();
+    }
+  }, [rejectTarget]);
+
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -316,6 +369,11 @@ export default function AdminDashboard() {
   const activeOwners = useMemo(
     () => data.owners.filter((o) => o.stationsCount > 0),
     [data.owners]
+  );
+
+  const pendingStations = useMemo(
+    () => data.stations.filter((s) => s.approvalStatus === 'Pending'),
+    [data.stations]
   );
 
   const table = useMemo(
@@ -359,18 +417,19 @@ export default function AdminDashboard() {
     const counts = {
       available: 0,
       busy: 0,
+      reserved: 0,
       faulty: 0,
       inactive: 0,
     };
     for (const s of data.stations) {
+      const status = s.currentStatus?.toLowerCase();
       if (!s.isActive) {
         counts.inactive += 1;
-      } else if (s.currentStatus?.toLowerCase() === 'faulty') {
+      } else if (status === 'faulty') {
         counts.faulty += 1;
-      } else if (
-        s.currentStatus?.toLowerCase() === 'busy' ||
-        s.currentStatus?.toLowerCase() === 'occupied'
-      ) {
+      } else if (status === 'reserved') {
+        counts.reserved += 1;
+      } else if (status === 'busy' || status === 'occupied') {
         counts.busy += 1;
       } else {
         counts.available += 1;
@@ -378,7 +437,8 @@ export default function AdminDashboard() {
     }
     return [
       { label: 'זמינות', count: counts.available, color: '#16a34a' },
-      { label: 'תפוסות / משוריינות', count: counts.busy, color: '#ea580c' },
+      { label: 'תפוסות', count: counts.busy, color: '#ea580c' },
+      { label: 'משוריינות', count: counts.reserved, color: '#2563eb' },
       { label: 'תקולות', count: counts.faulty, color: '#dc2626' },
       { label: 'מושבתות', count: counts.inactive, color: '#64748b' },
     ];
@@ -396,6 +456,57 @@ export default function AdminDashboard() {
     setOnlyFaults(false);
     setActionError(null);
     setActionSuccess(null);
+  }
+
+  function openRejectDialog(station: Station) {
+    setRejectTarget(station);
+    setRejectReason('');
+    setRejectValidationError(null);
+    setActionError(null);
+    setActionSuccess(null);
+  }
+
+  function requestApproveStation(station: Station) {
+    setPendingAction({
+      title: 'אישור עמדת טעינה',
+      message: `האם לאשר את העמדה "${station.name}" (${station.address}) להצגה עבור כלל הנהגים?`,
+      confirmText: 'אשר עמדה',
+      variant: 'primary',
+      successMessage: `העמדה "${station.name}" אושרה בהצלחה ותופיע מעכשיו לנהגים.`,
+      run: async () => {
+        await reviewAdminStation(station.id, { approvalStatus: 'Approved' });
+      },
+    });
+  }
+
+  async function handleConfirmReject() {
+    if (!rejectTarget) return;
+    const trimmed = rejectReason.trim();
+    if (!trimmed) {
+      setRejectValidationError('יש להזין סיבת דחייה שתוצג לבעל העמדה.');
+      return;
+    }
+
+    setRejectLoading(true);
+    setActionError(null);
+    setActionSuccess(null);
+    try {
+      await reviewAdminStation(rejectTarget.id, {
+        approvalStatus: 'Rejected',
+        rejectionReason: trimmed,
+      });
+      setActionSuccess(`העמדה "${rejectTarget.name}" נדחתה והסיבה נשלחה לבעל התחנה.`);
+      setRejectTarget(null);
+      setRejectReason('');
+      setRefresh((v) => v + 1);
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : 'דחיית העמדה נכשלה.'
+      );
+      setRejectTarget(null);
+    } finally {
+      setRejectLoading(false);
+    }
   }
 
   async function executePendingAction() {
@@ -435,6 +546,7 @@ export default function AdminDashboard() {
                 title: 'מחיקת משתמש',
                 message: `האם למחוק את המשתמש "${user.name}" (${user.email}) מהמערכת? פעולה זו אינה הפיכה.`,
                 confirmText: 'מחק משתמש',
+                variant: 'danger',
                 successMessage: `המשתמש "${user.name}" נמחק בהצלחה.`,
                 run: () => deleteAdminUser(user.id),
               })
@@ -460,6 +572,7 @@ export default function AdminDashboard() {
                 title: 'מחיקת פרופיל נהג',
                 message: `האם למחוק את פרופיל הנהג של "${driver.name}" (#${driver.id})?`,
                 confirmText: 'מחק פרופיל נהג',
+                variant: 'danger',
                 successMessage: `פרופיל הנהג של "${driver.name}" נמחק בהצלחה.`,
                 run: () => deleteAdminDriver(driver.id),
               })
@@ -485,6 +598,7 @@ export default function AdminDashboard() {
                 title: 'מחיקת פרופיל בעל תחנה',
                 message: `האם למחוק את פרופיל בעל התחנה "${owner.name}" (#${owner.id})?`,
                 confirmText: 'מחק בעלים',
+                variant: 'danger',
                 successMessage: `פרופיל בעל התחנה "${owner.name}" נמחק בהצלחה.`,
                 run: () => deleteAdminOwner(owner.id),
               })
@@ -492,6 +606,76 @@ export default function AdminDashboard() {
           >
             <Trash2 size={14} />
             מחק בעלים
+          </button>
+        </div>
+      );
+    }
+
+    if (page === 'stations') {
+      const station = data.stations.find((s) => s.id === rowId);
+      if (!station) return null;
+      return (
+        <div className="admin-actions-cell">
+          <a
+            href={getMapsUrl(station.latitude, station.longitude)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="admin-action-btn"
+            style={{ textDecoration: 'none' }}
+          >
+            <MapPin size={14} />
+            מפה
+          </a>
+          {station.approvalStatus !== 'Approved' && (
+            <button
+              type="button"
+              className="admin-action-btn"
+              style={{
+                borderColor: '#86efac',
+                background: '#f0fdf4',
+                color: '#166534',
+              }}
+              onClick={() => requestApproveStation(station)}
+            >
+              <CheckCircle2 size={14} />
+              אשר
+            </button>
+          )}
+          {station.approvalStatus !== 'Rejected' && (
+            <button
+              type="button"
+              className="admin-action-btn danger"
+              onClick={() => openRejectDialog(station)}
+            >
+              <XCircle size={14} />
+              דחה
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    if (page === 'reviews') {
+      const review = data.reviews.find((r) => r.id === rowId);
+      if (!review) return null;
+      return (
+        <div className="admin-actions-cell">
+          <button
+            type="button"
+            className="admin-action-btn danger"
+            onClick={() =>
+              setPendingAction({
+                title: 'מחיקת ביקורת',
+                message: `האם למחוק את הביקורת של "${review.driverName}" על "${review.stationName}"?`,
+                confirmText: 'מחק ביקורת',
+                variant: 'danger',
+                successMessage: `הביקורת #${review.id} נמחקה בהצלחה.`,
+                run: () => deleteAdminReview(review.id),
+              })
+            }
+          >
+            <Trash2 size={14} />
+            מחק ביקורת
           </button>
         </div>
       );
@@ -510,6 +694,7 @@ export default function AdminDashboard() {
                 title: 'מחיקת רשומת יומן',
                 message: `האם למחוק את רשומת היומן #${log.id} (${log.stationName})?`,
                 confirmText: 'מחק רשומה',
+                variant: 'danger',
                 successMessage: `רשומת יומן #${log.id} נמחקה בהצלחה.`,
                 run: () => deleteAdminStatusLog(log.id),
               })
@@ -608,6 +793,12 @@ export default function AdminDashboard() {
           <>
             <div className="admin-stats">
               <StatCard
+                title="ממתינות לאישור"
+                value={metricValue('stations', pendingStations.length)}
+                icon={Clock}
+                tone={pendingStations.length > 0 ? 'orange' : 'green'}
+              />
+              <StatCard
                 title="משתמשים"
                 value={metricValue('users', data.users.length)}
                 icon={Users}
@@ -657,7 +848,90 @@ export default function AdminDashboard() {
               />
             </div>
 
-            <div className="admin-overview-grid">
+            <div className="admin-overview-grid" style={{ marginTop: '22px' }}>
+              <section className="admin-panel">
+                <h2>תור אימות ואישור עמדות ({pendingStations.length})</h2>
+                {loading || errors.stations ? (
+                  <p style={{ color: '#64748b' }}>הנתונים אינם זמינים כרגע.</p>
+                ) : pendingStations.length === 0 ? (
+                  <p style={{ color: '#047857', fontWeight: 600, margin: 0 }}>
+                    אין כרגע עמדות חדשות הממתינות לאימות.
+                  </p>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {pendingStations.map((station) => (
+                      <div
+                        key={station.id}
+                        style={{
+                          background: '#fffbeb',
+                          border: '1px solid #fde68a',
+                          borderRadius: '14px',
+                          padding: '14px 16px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          flexWrap: 'wrap',
+                          gap: '12px',
+                        }}
+                      >
+                        <div style={{ flex: '1 1 280px' }}>
+                          <div style={{ fontWeight: 700, fontSize: '15px', color: '#0f172a' }}>
+                            {station.name}{' '}
+                            <span style={{ color: '#64748b', fontWeight: 500, fontSize: '13px' }}>
+                              (#{station.id})
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '13px', color: '#334155', marginTop: '4px' }}>
+                            {station.address} · {station.chargerType} · {station.maxKw} kW · ₪
+                            {station.pricePerKwh.toFixed(2)}/kWh
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#475569', marginTop: '6px' }}>
+                            <strong>פרטי בעלים לאימות:</strong>{' '}
+                            {station.ownerName ?? `בעלים #${station.ownerId}`}
+                            {station.ownerEmail ? ` · ${station.ownerEmail}` : ''}
+                            {station.ownerPhone ? ` · ${station.ownerPhone}` : ''}
+                          </div>
+                        </div>
+
+                        <div className="admin-actions-cell">
+                          <a
+                            href={getMapsUrl(station.latitude, station.longitude)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="admin-action-btn"
+                            style={{ textDecoration: 'none' }}
+                          >
+                            <MapPin size={14} />
+                            בדוק במפה
+                          </a>
+                          <button
+                            type="button"
+                            className="admin-action-btn"
+                            style={{
+                              borderColor: '#86efac',
+                              background: '#f0fdf4',
+                              color: '#166534',
+                            }}
+                            onClick={() => requestApproveStation(station)}
+                          >
+                            <CheckCircle2 size={14} />
+                            אשר עמדה
+                          </button>
+                          <button
+                            type="button"
+                            className="admin-action-btn danger"
+                            onClick={() => openRejectDialog(station)}
+                          >
+                            <XCircle size={14} />
+                            דחה עמדה
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
               <section className="admin-panel">
                 <h2>מצב עמדות הטעינה</h2>
                 {loading || errors.stations ? (
@@ -742,6 +1016,18 @@ export default function AdminDashboard() {
                             <StatusBadge
                               status={cell === null ? null : String(cell)}
                             />
+                          ) : index === table.approvalColumn ? (
+                            (() => {
+                              const meta = getApprovalMeta(
+                                cell === null ? null : String(cell)
+                              );
+                              return (
+                                <span className={`dash-status tone-${meta.tone}`}>
+                                  <span className="dash-status-dot" />
+                                  {meta.label}
+                                </span>
+                              );
+                            })()
                           ) : typeof cell === 'boolean' ? (
                             cell ? 'כן' : 'לא'
                           ) : (
@@ -796,13 +1082,85 @@ export default function AdminDashboard() {
         title={pendingAction?.title ?? ''}
         message={pendingAction?.message ?? ''}
         confirmText={pendingAction?.confirmText ?? 'אישור'}
-        variant="danger"
+        variant={pendingAction?.variant ?? 'danger'}
         loading={actionLoading}
         onConfirm={() => void executePendingAction()}
         onCancel={() => {
           if (!actionLoading) setPendingAction(null);
         }}
       />
+
+      <dialog
+        ref={rejectDialogRef}
+        className="smart-dialog dialog-danger"
+        dir="rtl"
+        onCancel={(event) => {
+          event.preventDefault();
+          if (!rejectLoading) setRejectTarget(null);
+        }}
+      >
+        <div className="smart-dialog-header">
+          <div className="smart-dialog-icon">
+            <XCircle size={28} />
+          </div>
+          <button
+            type="button"
+            className="smart-dialog-close"
+            aria-label="סגירה"
+            disabled={rejectLoading}
+            onClick={() => setRejectTarget(null)}
+          >
+            <X size={21} />
+          </button>
+        </div>
+        <h2>דחיית עמדה</h2>
+        <p>
+          דחיית העמדה <strong>{rejectTarget?.name}</strong> תסתיר אותה ממפת הנהגים ותציג את הסיבה לבעל התחנה.
+        </p>
+        <div style={{ marginTop: '12px', textAlign: 'right' }}>
+          <label
+            htmlFor="admin-reject-reason"
+            style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '6px' }}
+          >
+            סיבת הדחייה
+          </label>
+          <textarea
+            id="admin-reject-reason"
+            rows={3}
+            className="form-control"
+            placeholder="לדוגמה: הכתובת שגויה או שלא ניתן לאמת עמדה קיימת במיקום זה..."
+            value={rejectReason}
+            disabled={rejectLoading}
+            onChange={(e) => {
+              setRejectReason(e.target.value);
+              if (rejectValidationError) setRejectValidationError(null);
+            }}
+          />
+          {rejectValidationError && (
+            <div style={{ color: '#b91c1c', fontSize: '12px', marginTop: '6px' }}>
+              {rejectValidationError}
+            </div>
+          )}
+        </div>
+        <div className="smart-dialog-actions" style={{ marginTop: '16px' }}>
+          <button
+            type="button"
+            className="smart-dialog-cancel"
+            disabled={rejectLoading}
+            onClick={() => setRejectTarget(null)}
+          >
+            ביטול
+          </button>
+          <button
+            type="button"
+            className="smart-dialog-confirm"
+            disabled={rejectLoading}
+            onClick={() => void handleConfirmReject()}
+          >
+            {rejectLoading ? 'שומר דחייה...' : 'אשר דחייה'}
+          </button>
+        </div>
+      </dialog>
     </div>
   );
 }
