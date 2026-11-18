@@ -6,9 +6,13 @@ import { useAppSelector } from '../store/hooks';
 import type { DriverCoords, Station } from '../store/stations/stationsState';
 
 interface ChatMessage {
+  id: string; // מזהה ייחודי לכל הודעה – משמש כ-key ב-map
   role: 'user' | 'ai';
   text: string;
 }
+
+const newMessageId = (): string =>
+  `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
 interface RecommendedAction {
   id: number;
@@ -302,6 +306,7 @@ export default function VoiceAgentWidget() {
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
+      id: 'welcome',
       role: 'ai',
       text: 'היי! אני העוזר החכם שלך לטעינה. לחצי על המיקרופון, דברי חופשי, וכשאת מוכנה לחצי שלח — ותקבלי כפתור ישיר לשריון העמדה.',
     },
@@ -508,8 +513,8 @@ export default function VoiceAgentWidget() {
     setHasActiveBookingError(false);
     setInputText('');
 
-    const userMsg: ChatMessage = { role: 'user', text: trimmed };
-    setMessages((prev) => [...prev, userMsg, { role: 'ai', text: '' }]);
+    const userMsg: ChatMessage = { id: newMessageId(), role: 'user', text: trimmed };
+    setMessages((prev) => [...prev, userMsg, { id: newMessageId(), role: 'ai', text: '' }]);
     setIsStreaming(true);
 
     const abortController = new AbortController();
@@ -532,7 +537,7 @@ export default function VoiceAgentWidget() {
           } (אם הנהג מבקש "הכי קרוב" או ממהר, תן משקל weightDistance=0.85 וציין chargerType לפי הצורך).]`
         : trimmed;
 
-      const historyForServer: ChatMessage[] = [
+      const historyForServer: Pick<ChatMessage, 'role' | 'text'>[] = [
         ...messages.slice(1),
         { role: 'user' as const, text: promptWithLocationContext },
       ].map((m) => ({
@@ -1070,7 +1075,7 @@ export default function VoiceAgentWidget() {
               if (msg.role === 'user') {
                 return (
                   <div
-                    key={idx}
+                    key={msg.id}
                     style={{
                       alignSelf: 'flex-start',
                       maxWidth: '84%',
@@ -1095,7 +1100,7 @@ export default function VoiceAgentWidget() {
 
               return (
                 <div
-                  key={idx}
+                  key={msg.id}
                   style={{
                     alignSelf: 'flex-end',
                     maxWidth: '88%',

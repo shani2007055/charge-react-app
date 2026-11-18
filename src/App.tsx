@@ -329,11 +329,7 @@ function Layout() {
 }
 
 export default function App() {
-  const { token, role } = useAppSelector(
-    (state) => state.user
-  );
 
-  const homePath = getHomePath(token, role);
 
   return (
     <>
@@ -346,13 +342,9 @@ export default function App() {
           />
 
           <Route
-            path="/login"
-            element={
-              token
-                ? <Navigate to={homePath} replace />
-                : <LoginScreen />
-            }
-          />
+  path="/login"
+  element={<LoginScreen />}
+/>
             <Route
   path="/welcome"
   element={

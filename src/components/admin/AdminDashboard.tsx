@@ -1145,7 +1145,7 @@ export default function AdminDashboard() {
                   {visibleRows.map((row) => (
                     <tr key={row.id}>
                       {row.cells.map((cell, index) => (
-                        <td key={index}>
+                        <td key={table.headers[index] ?? `extra-${index}`}>
                           {index === table.statusColumn ? (
                             <StatusBadge
                               status={cell === null ? null : String(cell)}
