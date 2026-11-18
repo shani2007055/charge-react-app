@@ -1,7 +1,6 @@
 
 import { useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
-
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   Mail,
   LockKeyhole,
@@ -97,8 +96,13 @@ export default function LoginScreen() {
 
   const [mode, setMode] = useState<AuthMode>('login');
 
-  const [role, setRole] =
-    useState<UserRole>('Driver');
+  const [searchParams] = useSearchParams();
+
+const [role, setRole] = useState<UserRole>(
+  searchParams.get('role') === 'Owner'
+    ? 'Owner'
+    : 'Driver'
+);
 
   const [values, setValues] = useState({
     name: '',

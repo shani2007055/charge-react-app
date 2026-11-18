@@ -6,7 +6,9 @@ import {
   Zap,
   CalendarCheck,
   Mic,
-  ArrowLeft
+  ArrowLeft,
+  Search,
+  House
 } from 'lucide-react';
 
 import { useAppSelector } from '../store/hooks';
@@ -46,6 +48,29 @@ export default function HomeScreen() {
 
     navigate(path);
   }
+  function openJourney(targetRole: 'Driver' | 'Owner') {
+
+  if (!token) {
+    navigate(`/login?role=${targetRole}`);
+    return;
+  }
+
+  if (isAdmin) {
+    navigate('/admin');
+    return;
+  }
+
+  if (role === targetRole) {
+    navigate(
+      targetRole === 'Driver'
+        ? '/search'
+        : '/owner'
+    );
+    return;
+  }
+
+  navigate('/profile');
+}
 
   function openAssistant() {
 
@@ -95,27 +120,59 @@ export default function HomeScreen() {
         <div className="home-hero-content">
 
           <span className="home-tag">
-            העתיד כבר חשמלי
-          </span>
+               <Zap size={16} />
+                הדור הבא של הטעינה השיתופית
+              </span>
 
           <h1>
-            הטעינה הבאה שלך
-            <span> מתחילה כאן.</span>
-          </h1>
+  מחברים אנשים.
+  <span>משתפים אנרגיה.</span>
+</h1>
 
-          <p>
-            מצאו את עמדת הטעינה המתאימה לכם,
-            שריינו מקום מראש ותכננו את הדרך
-            בצורה חכמה ופשוטה.
-          </p>
+<p>
+  רשת טעינה שיתופית המחברת בין בעלי
+  עמדות טעינה פרטיות לבין נהגים
+  המחפשים טעינה קרובה, זמינה ונוחה.
+</p>
 
-          <button
-            type="button"
-            className="home-primary"
-            onClick={() => openFeature('/search')}
-          >
-            מתחילים עכשיו ←
-          </button>
+<div className="home-community-note">
+  <span className="home-green-dot" />
+  משתפים עמדות. חוסכים זמן. יוצרים עתיד ירוק.
+</div>
+          
+          <div className="home-action-buttons">
+
+  <button
+    type="button"
+    className="home-journey-button home-journey-driver"
+    onClick={() => openJourney('Driver')}
+  >
+    <Search size={25} />
+
+    <div>
+      <strong>מציאת עמדת טעינה</strong>
+      <small>אני מחפש טעינה</small>
+    </div>
+
+    <ArrowLeft size={18} />
+  </button>
+
+  <button
+    type="button"
+    className="home-journey-button home-journey-owner"
+    onClick={() => openJourney('Owner')}
+  >
+    <House size={25} />
+
+    <div>
+      <strong>שיתוף עמדה פרטית</strong>
+      <small>יש לי עמדת טעינה</small>
+    </div>
+
+    <ArrowLeft size={18} />
+  </button>
+
+</div>
 
           {isDriver && (
             <button

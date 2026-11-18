@@ -414,3 +414,137 @@
     gap: 10px;
   }
 }
+.home-community-note {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #86efac;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 28px;
+}
+
+.home-green-dot {
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #22c55e;
+  box-shadow: 0 0 0 5px #22c55e25;
+}
+/* Shared charging journey buttons */
+
+.home-action-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  width: 100%;
+}
+
+.home-journey-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+
+  padding: 18px 14px;
+  border-radius: 16px;
+
+  font: inherit;
+  text-align: right;
+  cursor: pointer;
+
+  transition:
+    transform 0.25s ease,
+    background 0.25s ease,
+    box-shadow 0.25s ease;
+}
+
+.home-journey-button div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.home-journey-button strong {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.home-journey-button small {
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.home-journey-button svg {
+  flex-shrink: 0;
+}
+
+/* Driver */
+
+.home-journey-driver {
+  background: #ea580c;
+  color: white;
+  border: 1px solid #ea580c;
+  box-shadow: 0 8px 25px #ea580c30;
+}
+
+.home-journey-driver:hover {
+  background: #c2410c;
+  transform: translateY(-5px);
+  box-shadow: 0 15px 35px #ea580c40;
+}
+
+/* Station owner */
+
+.home-journey-owner {
+  background: #ffffff08;
+  border: 1px solid #fb923c;
+  color: #fb923c;
+}
+
+.home-journey-owner small {
+  color: #cbd5e1;
+}
+
+.home-journey-owner:hover {
+  background: #ea580c18;
+  transform: translateY(-5px);
+  box-shadow: 0 12px 30px #ea580c15;
+}
+
+.home-journey-button:focus-visible {
+  outline: 2px solid #fdba74;
+  outline-offset: 4px;
+}
+
+/* Responsive */
+
+@media (max-width: 1300px) {
+
+  .home-action-buttons {
+    grid-template-columns: 1fr;
+  }
+
+  .home-journey-button {
+    justify-content: flex-start;
+  }
+
+  .home-journey-button div {
+    flex: 1;
+  }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+  .home-journey-button {
+    transition: none;
+  }
+
+  .home-journey-button:hover {
+    transform: none;
+  }
+
+}
