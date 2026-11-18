@@ -8,7 +8,9 @@ import {
   Mic,
   ArrowLeft,
   Search,
-  House
+  House,
+  BatteryCharging,
+  Leaf
 } from 'lucide-react';
 
 import { useAppSelector } from '../store/hooks';
@@ -226,7 +228,97 @@ export default function HomeScreen() {
         })}
 
       </section>
+              <section className="home-how-it-works">
 
+        <div className="home-how-header">
+
+          <span className="home-how-kicker">
+            פשוט. חכם. שיתופי.
+          </span>
+
+          <h2>איך זה עובד?</h2>
+
+          <p>
+            שלושה צעדים קטנים לעולם טעינה גדול יותר.
+          </p>
+
+        </div>
+
+        <div className="home-steps-grid">
+
+          <article className="home-step-card">
+
+            <div className="home-step-top">
+              <div className="home-step-icon">
+                <House size={30} />
+              </div>
+              <span className="home-step-number">
+                01
+              </span>
+            </div>
+
+            <h3>משתפים עמדה</h3>
+
+            <p>
+              בעלי עמדות טעינה פרטיות מפרסמים
+              את העמדה שלהם ומגדירים מחיר וזמינות.
+            </p>
+
+          </article>
+
+          <article className="home-step-card">
+
+            <div className="home-step-top">
+              <div className="home-step-icon">
+                <MapPin size={30} />
+              </div>
+              <span className="home-step-number">
+                02
+              </span>
+            </div>
+
+            <h3>מוצאים ומשריינים</h3>
+
+            <p>
+              נהגים מוצאים עמדת טעינה מתאימה
+              ומשריינים מראש את זמן הטעינה שלהם.
+            </p>
+
+          </article>
+
+          <article className="home-step-card">
+
+            <div className="home-step-top">
+              <div className="home-step-icon">
+                <BatteryCharging size={30} />
+              </div>
+              <span className="home-step-number">
+                03
+              </span>
+            </div>
+
+            <h3>מטעינים ונהנים</h3>
+
+            <p>
+              מגיעים לעמדה ומטעינים בקלות,
+              כחלק מקהילת טעינה שיתופית.
+            </p>
+
+          </article>
+
+        </div>
+
+        <div className="home-community-banner">
+
+          <Leaf size={23} />
+
+          <span>
+            יותר עמדות. יותר אפשרויות. קהילה אחת.
+          </span>
+
+        </div>
+
+      </section>
     </div>
   );
 }

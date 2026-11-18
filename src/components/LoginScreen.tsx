@@ -1,6 +1,6 @@
 
 import { useState, type FormEvent } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams,useNavigate } from 'react-router-dom';
 import {
   Mail,
   LockKeyhole,
@@ -34,7 +34,10 @@ import {
   registerUser
 } from '../store/user/userThunks';
 
-import type { UserRole } from '../store/user/userState';
+import {
+  isAdminToken,
+  type UserRole
+} from '../store/user/userState';
 
 import {
   validateLogin,
@@ -131,6 +134,7 @@ const [role, setRole] = useState<UserRole>(
     useState<string | null>(null);
 
   const dispatch = useAppDispatch();
+  const navigate = useNavigate();
  
 
   const { loading, sessionExpiredMessage } =
@@ -197,45 +201,60 @@ const [role, setRole] = useState<UserRole>(
     setErrorMessage('');
   }
 
-  async function handleAuth() {
+  
+async function handleAuth() {
 
-    const validation =
-      mode === 'register'
-        ? validateRegister(values)
-        : validateLogin(values.email, values.password);
+  const validation =
+    mode === 'register'
+      ? validateRegister(values)
+      : validateLogin(values.email, values.password);
 
-    setErrors(validation);
+  setErrors(validation);
 
-    if (Object.keys(validation).length > 0) return;
+  if (Object.keys(validation).length > 0) return;
 
-    try {
+  try {
 
-      if (mode === 'login') {
+    if (mode === 'login') {
 
-        await dispatch(loginUser({
-          email: values.email.trim(),
-          password: values.password,
-          role
-        })).unwrap();
+     const result = await dispatch(loginUser({
+  email: values.email.trim(),
+  password: values.password,
+  role
+})).unwrap();
 
-      } else {
+navigate(
+  isAdminToken(result.token)
+    ? '/admin'
+    : result.role === 'Owner'
+      ? '/owner'
+      : '/search',
+  { replace: true }
+);
 
-        await dispatch(registerUser({
-          name: values.name.trim(),
-          email: values.email.trim(),
-          phone: values.phone.trim(),
-          password: values.password,
-          confirmPassword: values.confirmPassword,
-          role
-        })).unwrap();
-      }
+    } else {
 
-      
+      await dispatch(registerUser({
+        name: values.name.trim(),
+        email: values.email.trim(),
+        phone: values.phone.trim(),
+        password: values.password,
+        confirmPassword: values.confirmPassword,
+        role
+      })).unwrap();
 
-    } catch (error) {
-      setErrorMessage(getErrorMessage(error));
+      navigate('/welcome', {
+        replace: true
+      });
+
     }
+
+  } catch (error) {
+
+    setErrorMessage(getErrorMessage(error));
+
   }
+}
 
   async function handleForgot() {
 

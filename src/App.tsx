@@ -12,6 +12,7 @@ import { Zap } from 'lucide-react';
 import RoleSwitcher from './components/RoleSwitcher';
 import AdminDashboard from './components/admin/AdminDashboard';
 import HomeScreen from './components/HomeScreen';
+import WelcomeScreen from './components/WelcomeScreen';
 import LoginScreen from './components/LoginScreen';
 import DriverSearchScreen from './components/DriverSearchScreen';
 import StationResultsScreen from './components/StationResultsScreen';
@@ -352,7 +353,14 @@ export default function App() {
                 : <LoginScreen />
             }
           />
-
+            <Route
+  path="/welcome"
+  element={
+    <ProtectedRoute>
+      <WelcomeScreen />
+    </ProtectedRoute>
+  }
+/>
           <Route
             path="/search"
             element={

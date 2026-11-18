@@ -548,3 +548,167 @@
   }
 
 }
+/* ====================================
+   HOW IT WORKS - SHARED CHARGING
+==================================== */
+
+.home-how-it-works {
+  padding: clamp(35px, 5vw, 75px);
+  background: #ffffff;
+  border-top: 1px solid #e2e8f0;
+}
+
+/* Section heading */
+
+.home-how-header {
+  text-align: center;
+  margin-bottom: 38px;
+}
+
+.home-how-kicker {
+  display: inline-block;
+  color: #ea580c;
+  background: #fff7ed;
+  padding: 7px 18px;
+  border-radius: 30px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.home-how-header h2 {
+  color: #0f172a;
+  font-size: clamp(30px, 3vw, 46px);
+  font-weight: 800;
+  margin: 15px 0 10px;
+}
+
+.home-how-header p {
+  color: #64748b;
+  font-size: 17px;
+  margin: 0;
+}
+
+/* Steps grid */
+
+.home-steps-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 22px;
+}
+
+/* Step cards */
+
+.home-step-card {
+  position: relative;
+  background: #ffffff;
+  padding: 28px;
+  border: 1px solid #e2e8f0;
+  border-radius: 22px;
+
+  box-shadow: 0 8px 25px #0f172a08;
+
+  transition:
+    transform 0.3s ease,
+    box-shadow 0.3s ease,
+    border-color 0.3s ease;
+}
+
+.home-step-card:hover {
+  transform: translateY(-8px);
+  border-color: #fdba74;
+  box-shadow: 0 18px 45px #ea580c15;
+}
+
+.home-step-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 25px;
+}
+
+.home-step-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  color: #ea580c;
+  background: #fff7ed;
+  transition: 0.3s ease;
+}
+
+.home-step-card:hover .home-step-icon {
+  background: #ea580c;
+  color: #ffffff;
+  transform: scale(1.08);
+}
+
+.home-step-number {
+  font-size: 44px;
+  font-weight: 800;
+  color: #fed7aa;
+  line-height: 1;
+}
+
+.home-step-card h3 {
+  font-size: 23px;
+  color: #0f172a;
+  margin: 0 0 12px;
+}
+
+.home-step-card p {
+  color: #64748b;
+  font-size: 15px;
+  line-height: 1.85;
+  margin: 0;
+}
+
+/* Green community banner */
+
+.home-community-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+
+  margin-top: 30px;
+  padding: 18px;
+
+  background: #f0fdf4;
+  border: 1px solid #dcfce7;
+  color: #15803d;
+
+  border-radius: 16px;
+  font-size: 16px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* Responsive */
+
+@media (max-width: 900px) {
+  .home-steps-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .home-how-it-works {
+    padding: 35px 22px;
+  }
+}
+
+@media (max-width: 550px) {
+  .home-step-card {
+    padding: 22px;
+  }
+
+  .home-community-banner {
+    font-size: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-step-card:hover,
+  .home-step-card:hover .home-step-icon {
+    transform: none;
+  }
+}
